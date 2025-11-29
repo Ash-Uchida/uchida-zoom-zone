@@ -1,0 +1,124 @@
+.app-container {
+  position: relative;      /* for Google button positioning */
+  min-height: 100vh;       /* full viewport height */
+  width: 100vw;            /* full viewport width */
+  padding: 24px;           /* space inside the container */
+  box-sizing: border-box;  /* include padding in width */
+  font-family: sans-serif;
+  background: #c3f7c3;     /* soft green background */
+  color: #000000;          /* black text */
+  text-align: center;      /* center text */
+}
+
+/* Header for "Book a Meeting" */
+.app-container h1 {
+  color: #000000; /* black header text */
+  margin-bottom: 20px;
+}
+
+.calendar-container {
+  width: 90%;             /* almost full width */
+  max-width: 1000px;      /* larger max width */
+  margin: 0 auto;          /* center horizontally */
+  border: 1px solid #ccc;
+  padding: 24px;           /* more padding for spacious feel */
+  border-radius: 8px;
+  background: #ffffff;
+  color: #000000;
+  font-size: 16px;         /* larger text */
+}
+
+.calendar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;     /* slightly more spacing */
+}
+
+.calendar-header button {
+  cursor: pointer;
+  padding: 6px 12px;       /* slightly bigger buttons */
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  background: #f0f0f0;
+  color: #000000;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 10px;               /* bigger gap between days */
+}
+
+.calendar-day-label {
+  font-weight: bold;
+  text-align: center;
+  font-size: 16px;         /* bigger labels */
+}
+
+.calendar-day {
+  text-align: center;
+  padding: 20px 0;         /* taller day boxes */
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.2s;
+  background: #ffffff;
+  color: #000000;
+  border: 1px solid #ddd;
+  font-size: 16px;          /* bigger day numbers */
+}
+
+.calendar-day:hover {
+  background: #c3f7c3; /* hover highlight */
+}
+.form-container {
+  margin-top: 20px;
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.form-container input,
+.form-container select {
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+}
+
+.submit-btn {
+  background: #4caf50;
+  color: white;
+  border: none;
+  padding: 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.submit-btn:hover {
+  background: #43a047;
+}
+
+.status {
+  margin-top: 15px;
+  font-size: 16px;
+}
+
+.calendar-day.selected {
+  background: #4caf50;
+  color: white;
+}
+.calendar-day.selected:hover {
+  background: #43a047;
+}
+.subheading {
+  font-size: 18px;  /* smaller than h1 */
+  color: #333;      /* slightly darker text */
+  margin-top: 8px;
+  margin-bottom: 24px;
+}
