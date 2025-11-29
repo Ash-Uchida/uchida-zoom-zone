@@ -12,6 +12,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.86.0",
     "dayjs": "^1.11.19",
+    "googleapis": "^166.0.0",
     "node-fetch": "^3.3.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
