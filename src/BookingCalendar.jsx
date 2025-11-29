@@ -5,7 +5,6 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
   const [busyDates, setBusyDates] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Fetch busy dates from Google Calendar
   useEffect(() => {
     const fetchBusyDates = async () => {
       setLoading(true);
@@ -13,7 +12,6 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
         const res = await fetch("/api/calendar/freebusy");
         const data = await res.json();
 
-        // Extract busy dates as array of ISO strings
         const busy = [];
         if (data.calendars && data.calendars.primary?.busy) {
           data.calendars.primary.busy.forEach(slot => {
@@ -37,42 +35,15 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
     new Date(currentMonth.getFullYear(), currentMonth.getMonth(), i + 1)
   );
 
-  const handlePrevMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
-  const handleNextMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+  const handlePrevMonth = () =>
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+  const handleNextMonth = () =>
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
 
-  const handleSelectDate = async (date) => {
+  const handleSelectDate = (date) => {
     const isoDate = date.toISOString().split("T")[0];
-    if (busyDates.includes(isoDate)) {
-      alert("This date is unavailable!");
-      return;
-    }
-
+    if (busyDates.includes(isoDate)) return;
     onSelectDate(date);
-
-    // Automatically create an event in Google Calendar
-    try {
-      const startDateTime = new Date(date);
-      startDateTime.setHours(15, 0, 0); // 3:00 PM default
-      const endDateTime = new Date(date);
-      endDateTime.setHours(15, 30, 0); // 30-min meeting
-
-      const res = await fetch("/api/calendar/events", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          summary: "Meeting with Zoom Zone",
-          start: startDateTime.toISOString(),
-          end: endDateTime.toISOString(),
-        }),
-      });
-
-      const result = await res.json();
-      console.log("Event created:", result);
-      alert("Meeting booked successfully!");
-    } catch (err) {
-      console.error("Failed to create event:", err);
-      alert("Failed to book meeting.");
-    }
   };
 
   return (
