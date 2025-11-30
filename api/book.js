@@ -187,15 +187,18 @@ export default async function handler(req, res) {
     const googleData = await googleRes.json();
 
     // ---- Save booking to Supabase ----
-    const { data: bookingData, error: bookingError } = await supabase.from("bookings").insert([
-      {
-        name,
-        email,
-        time: dateTime,
-        zoom_link: zoomData.join_url,
-        created_at: new Date(),
-      },
-    ]);
+    const { data: bookingData, error: bookingError } = await supabase.from("bookings").insert(
+      [
+        {
+          name,
+          email,
+          time: dateTime,
+          zoom_link: zoomData.join_url,
+          created_at: new Date(),
+        },
+      ],
+      { returning: "representation" } // ✅ ensure we get the inserted row
+    );
 
     if (bookingError) {
       console.error("Supabase insert error:", bookingError);
