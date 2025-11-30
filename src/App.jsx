@@ -92,8 +92,6 @@ export default function App() {
             Duration (minutes):
             <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
               <option value={15}>15</option>
-              <option value={20}>20</option>
-              <option value={25}>25</option>
               <option value={30}>30</option>
               <option value={45}>45</option>
               <option value={60}>60</option>
