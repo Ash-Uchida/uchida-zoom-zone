@@ -167,6 +167,7 @@ export default async function handler(req, res) {
     });
 
     if (!googleRes.ok) {
+      // Refresh token if expired
       googleAccessToken = await refreshGoogleToken(google.refresh_token);
       googleRes = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
         method: "POST",
@@ -194,16 +195,18 @@ export default async function handler(req, res) {
           email,
           time: dateTime,
           zoom_link: zoomData.join_url,
-          created_at: new Date(),
+          created_at: new Date().toISOString(),
         },
       ],
-      { returning: "representation" } // ✅ ensure we get the inserted row
+      { returning: "representation" } // <- ensures bookingData[0] exists
     );
 
     if (bookingError) {
       console.error("Supabase insert error:", bookingError);
       return res.status(500).json({ error: "Failed to save booking", details: bookingError });
     }
+
+    const supabaseBookingId = bookingData && bookingData[0] ? bookingData[0].id : null;
 
     // ---- Send emails ----
     await sendBookingEmails({ name, email, dateTime, zoomLink: zoomData.join_url });
@@ -213,7 +216,7 @@ export default async function handler(req, res) {
       message: "Booking successful!",
       zoomLink: zoomData.join_url,
       googleEventId: googleData.id,
-      supabaseBookingId: bookingData[0].id,
+      supabaseBookingId,
     });
   } catch (err) {
     console.error("Unexpected /api/book error:", err);
