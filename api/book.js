@@ -57,7 +57,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { name, email, time } = JSON.parse(req.body);
+    const { name, email, time } = req.body;
 
     if (!name || !email || !time) {
       return res.status(400).json({ error: "Missing required fields" });
