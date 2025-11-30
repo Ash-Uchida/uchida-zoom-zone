@@ -1,3 +1,4 @@
+// src/App.jsx
 import { useState, useEffect } from "react";
 import "./App.css";
 import BookingCalendar from "./BookingCalendar";
@@ -18,12 +19,46 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState(null);
 
+  const [availableSlots, setAvailableSlots] = useState([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+
   const handleSelectDate = (date) => {
     if (!date) return;
     const isoDate = date.toISOString().split("T")[0];
     setSelectedDate(date);
     localStorage.setItem("selectedDate", isoDate);
+    // clear previous time selection whenever date changes
+    setTime("");
   };
+
+  // Fetch available timeslots when selectedDate or duration changes
+  useEffect(() => {
+    const fetchSlots = async () => {
+      if (!selectedDate) {
+        setAvailableSlots([]);
+        return;
+      }
+
+      setLoadingSlots(true);
+      try {
+        const dateFormatted = selectedDate.toISOString().split("T")[0];
+        const res = await fetch(`/api/calendar/timeslots?date=${dateFormatted}&duration=${duration}`);
+        const data = await res.json();
+        if (data?.slots) {
+          setAvailableSlots(data.slots);
+        } else {
+          setAvailableSlots([]);
+        }
+      } catch (err) {
+        console.error("Failed to fetch timeslots:", err);
+        setAvailableSlots([]);
+      } finally {
+        setLoadingSlots(false);
+      }
+    };
+
+    fetchSlots();
+  }, [selectedDate, duration]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -48,6 +83,15 @@ export default function App() {
     } catch (err) {
       console.error(err);
       setStatus("Something went wrong.");
+    }
+  };
+
+  // helper to determine if a slot is in the past (based on iso)
+  const isPast = (iso) => {
+    try {
+      return new Date(iso) < new Date();
+    } catch {
+      return false;
     }
   };
 
@@ -76,15 +120,27 @@ export default function App() {
             onChange={(e) => setEmail(e.target.value)}
           />
 
-          {/* Time Input */}
+          {/* Time Dropdown (generated from API) */}
           <label>
             Meeting Time:
-            <input
-              type="time"
-              value={time}
-              onChange={(e) => setTime(e.target.value)}
-              required
-            />
+            {loadingSlots ? (
+              <div>Loading times...</div>
+            ) : availableSlots.length === 0 ? (
+              <div>No available times for this date.</div>
+            ) : (
+              <select value={time} onChange={(e) => setTime(e.target.value)} required>
+                <option value="">Select a time</option>
+                {availableSlots.map((s) => (
+                  <option
+                    key={s.iso}
+                    value={s.time}
+                    disabled={s.busy || isPast(s.iso)}
+                  >
+                    {s.time} {s.busy || isPast(s.iso) ? " (unavailable)" : ""}
+                  </option>
+                ))}
+              </select>
+            )}
           </label>
 
           {/* Duration Input */}

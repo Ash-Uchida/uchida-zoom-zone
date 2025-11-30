@@ -1,3 +1,4 @@
+// src/BookingCalendar.jsx
 import React, { useEffect, useState } from "react";
 
 export default function BookingCalendar({ selectedDate, onSelectDate }) {
@@ -9,6 +10,7 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
     const fetchBusyDates = async () => {
       setLoading(true);
       try {
+        // still useful as a month-level indicator; freebusy endpoint returns next 7 days in original code
         const res = await fetch("/api/calendar/freebusy");
         const data = await res.json();
 
@@ -41,8 +43,8 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
     setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
 
   const handleSelectDate = (date) => {
-    const isoDate = date.toISOString().split("T")[0];
-    if (busyDates.includes(isoDate)) return;
+    // Do NOT block selecting dates with busy slots — we want users to pick a date and then choose an available time.
+    if (!date) return;
     onSelectDate(date);
   };
 
@@ -70,10 +72,11 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
             <div
               key={isoDate}
               className={`calendar-day ${isSelected ? "selected" : ""} ${isBusy ? "busy" : ""}`}
-              onClick={() => !isBusy && handleSelectDate(date)}
-              style={{ cursor: isBusy ? "not-allowed" : "pointer", opacity: isBusy ? 0.5 : 1 }}
+              onClick={() => handleSelectDate(date)}
+              style={{ cursor: "pointer", opacity: isBusy ? 0.9 : 1 }}
             >
               {date.getDate()}
+              {isBusy && <div style={{ fontSize: 10, marginTop: 6 }}>busy</div>}
             </div>
           );
         })}
