@@ -1,81 +1,74 @@
-import express from "express";
-import { createEvent } from "./calendar/calendar.js";
-import { createZoomMeeting } from "./zoom.js";
 import { createClient } from "@supabase/supabase-js";
 
-const router = express.Router();
-
-// Load Supabase keys
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
 
-router.post("/", async (req, res) => {
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
   try {
-    const { name, email, time } = req.body;
+    const { name, email, time } = JSON.parse(req.body);
 
     if (!name || !email || !time) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    console.log("📅 Creating Google event…");
-
-    // 1. Create Google Calendar event
-    const googleEvent = await createEvent({
-      summary: `Meeting with ${name}`,
-      description: `Booking from ${email}`,
-      start: {
-        dateTime: time,
-        timeZone: "America/Phoenix",
-      },
-      end: {
-        dateTime: new Date(new Date(time).getTime() + 30 * 60 * 1000).toISOString(),
-        timeZone: "America/Phoenix",
-      },
-    });
-
-    console.log("📹 Creating Zoom meeting…");
-
-    // 2. Create Zoom meeting
-    const zoomMeeting = await createZoomMeeting({
-      topic: `Meeting with ${name}`,
-      start_time: time,
-    });
-
-    const zoom_link = zoomMeeting.join_url;
-
-    console.log("💾 Saving to Supabase…");
-
-    // 3. Save to Supabase
-    const { data, error } = await supabase
-      .from("bookings")
-      .insert({
+    //
+    // 1️⃣ Save booking to Supabase
+    //
+    const { data, error } = await supabase.from("bookings").insert([
+      {
         name,
         email,
         time,
-        zoom_link
-      })
-      .select()
-      .single();
+      },
+    ]);
 
     if (error) {
       console.error("Supabase insert error:", error);
-      return res.status(500).json({ error: "Failed to save booking in Supabase" });
+      return res.status(500).json({ error: "Failed to save booking" });
     }
 
-    console.log("✅ Booking saved:", data);
+    //
+    // 2️⃣ Create Google Calendar Event
+    //
+    const eventRes = await fetch(
+      "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.GOOGLE_ACCESS_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          summary: `Zoom Meeting with ${name}`,
+          start: { dateTime: time },
+          end: { dateTime: new Date(new Date(time).getTime() + 30 * 60000) }, // +30 min
+        }),
+      }
+    );
 
-    res.json({
+    const eventData = await eventRes.json();
+
+    if (!eventRes.ok) {
+      console.error("Google Calendar error:", eventData);
+      return res.status(500).json({
+        error: "Failed to create Google Calendar event",
+        details: eventData,
+      });
+    }
+
+    return res.status(200).json({
       success: true,
-      google_event: googleEvent,
-      zoom_link,
-      supabase_record: data,
+      booking: data,
+      calendarEvent: eventData,
     });
   } catch (err) {
-    console.error("Booking error:", err);
-    res.status(500).json({ error: err.message });
+    console.error("Unexpected /api/book error:", err);
+    return res.status(500).json({ error: "Server error", details: String(err) });
   }
-});
-
-export default router;
+}
