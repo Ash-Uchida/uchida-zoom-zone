@@ -10,7 +10,6 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
     const fetchBusyDates = async () => {
       setLoading(true);
       try {
-        // still useful as a month-level indicator; freebusy endpoint returns next 7 days in original code
         const res = await fetch("/api/calendar/freebusy");
         const data = await res.json();
 
@@ -43,7 +42,6 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
     setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
 
   const handleSelectDate = (date) => {
-    // Do NOT block selecting dates with busy slots — we want users to pick a date and then choose an available time.
     if (!date) return;
     onSelectDate(date);
   };
