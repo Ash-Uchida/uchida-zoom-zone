@@ -8,7 +8,7 @@ const supabase = createClient(
 );
 
 // ---- Email helper ----
-async function sendBookingEmails({ name, email, dateTime, zoomLink, duration }) {
+async function sendBookingEmails({ name, email, dateTimeISO, zoomLink, duration }) {
   const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: {
@@ -17,7 +17,7 @@ async function sendBookingEmails({ name, email, dateTime, zoomLink, duration }) 
     },
   });
 
-  const dateTimeStr = new Date(dateTime).toLocaleString();
+  const dateTimeStr = new Date(dateTimeISO).toLocaleString();
 
   // Email to participant
   await transporter.sendMail({
@@ -98,21 +98,52 @@ async function refreshZoomToken(refreshToken) {
   return tokenData.access_token;
 }
 
+// Validate HH:MM 24-hour string
+function isValidHHMM(t) {
+  if (typeof t !== "string") return false;
+  const m = t.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  return !!m;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
     const { name, email, date, time, duration = 15 } = req.body;
 
+    // Basic presence validation
     if (!name || !email || !date || !time)
-      return res.status(400).json({ error: "Missing required fields" });
+      return res.status(400).json({ error: "Missing required fields (name, email, date, time)" });
 
-    // ---------------------------
-    // 1️⃣ Convert to ISO timestamp (assume local time input from browser)
-    // ---------------------------
-    // input: date = "YYYY-MM-DD", time = "HH:MM"
-    const dateTime = new Date(`${date}T${time}:00`).toISOString();
-    const endTime = new Date(new Date(dateTime).getTime() + Number(duration) * 60000).toISOString();
+    // Validate duration
+    const dur = Number(duration) || 15;
+    if (!Number.isFinite(dur) || dur <= 0) return res.status(400).json({ error: "Invalid duration" });
+
+    // Validate date (YYYY-MM-DD)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD" });
+    }
+
+    // Validate time (HH:MM 24-hour)
+    if (!isValidHHMM(time)) {
+      return res.status(400).json({ error: "Invalid time format. Use 24-hour HH:MM" });
+    }
+
+    // Construct a Date from the date and time parts and ensure it's valid
+    const [hourStr, minStr] = time.split(":");
+    const year = Number(date.slice(0, 4));
+    const month = Number(date.slice(5, 7)) - 1; // JS months 0-11
+    const day = Number(date.slice(8, 10));
+    const hour = Number(hourStr);
+    const minute = Number(minStr);
+
+    const startDate = new Date(year, month, day, hour, minute, 0, 0);
+    if (isNaN(startDate.getTime())) {
+      return res.status(400).json({ error: "Invalid date or time values" });
+    }
+
+    const dateTimeISO = startDate.toISOString();
+    const endDateISO = new Date(startDate.getTime() + dur * 60000).toISOString();
 
     // ---------------------------
     // 2️⃣ Fetch tokens from Supabase
@@ -139,8 +170,8 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           topic: `Meeting with ${name}`,
           type: 2, // scheduled meeting
-          start_time: dateTime,
-          duration: Number(duration),
+          start_time: dateTimeISO,
+          duration: dur,
         }),
       });
       return await zoomRes.json();
@@ -148,7 +179,7 @@ export default async function handler(req, res) {
 
     let zoomData = await createZoomMeeting(zoomAccessToken);
 
-    // If Zoom token expired or invalid, try refresh (Zoom returns specific error codes sometimes)
+    // If Zoom token expired or invalid, try refresh
     if ((!zoomData.join_url && zoomData.code) || (zoomData.code === 124 || zoomData.code === 1241)) {
       zoomAccessToken = await refreshZoomToken(zoom.refresh_token);
       zoomData = await createZoomMeeting(zoomAccessToken);
@@ -169,8 +200,8 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         summary: `Zoom Meeting with ${name}`,
-        start: { dateTime },
-        end: { dateTime: endTime },
+        start: { dateTime: dateTimeISO },
+        end: { dateTime: endDateISO },
         attendees: [{ email }],
         description: `Join Zoom: ${zoomData.join_url}`,
       }),
@@ -187,8 +218,8 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({
           summary: `Zoom Meeting with ${name}`,
-          start: { dateTime },
-          end: { dateTime: endTime },
+          start: { dateTime: dateTimeISO },
+          end: { dateTime: endDateISO },
           attendees: [{ email }],
           description: `Join Zoom: ${zoomData.join_url}`,
         }),
@@ -208,9 +239,9 @@ export default async function handler(req, res) {
         {
           name,
           email,
-          time: dateTime,
-          end_time: endTime,
-          duration: Number(duration),
+          time: dateTimeISO,
+          end_time: endDateISO,
+          duration: dur,
           zoom_link: zoomData.join_url,
           created_at: new Date().toISOString(),
         },
@@ -226,9 +257,9 @@ export default async function handler(req, res) {
     await sendBookingEmails({
       name,
       email,
-      dateTime,
+      dateTimeISO,
       zoomLink: zoomData.join_url,
-      duration: Number(duration),
+      duration: dur,
     });
 
     // ---------------------------

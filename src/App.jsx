@@ -3,6 +3,28 @@ import { useState, useEffect } from "react";
 import "./App.css";
 import BookingCalendar from "./BookingCalendar";
 
+// helper: format ISO slot into local HH:MM (24-hour) for sending to backend
+function isoToLocalHHMM(iso) {
+  try {
+    const d = new Date(iso);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  } catch {
+    return "";
+  }
+}
+
+// helper: display time nicely in user's locale (e.g., 2:00 PM)
+function displayFromISO(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return iso;
+  }
+}
+
 export default function App() {
   const [selectedDate, setSelectedDate] = useState(() => {
     const saved = localStorage.getItem("selectedDate");
@@ -45,6 +67,7 @@ export default function App() {
         const res = await fetch(`/api/calendar/timeslots?date=${dateFormatted}&duration=${duration}`);
         const data = await res.json();
         if (data?.slots) {
+          // ensure slots array contains { iso, busy } and we keep iso
           setAvailableSlots(data.slots);
         } else {
           setAvailableSlots([]);
@@ -68,6 +91,7 @@ export default function App() {
       return;
     }
 
+    // time now contains HH:MM (24-hour) as we set option value to iso->local HH:MM
     const dateFormatted = selectedDate.toISOString().split("T")[0];
 
     try {
@@ -130,15 +154,16 @@ export default function App() {
             ) : (
               <select value={time} onChange={(e) => setTime(e.target.value)} required>
                 <option value="">Select a time</option>
-                {availableSlots.map((s) => (
-                  <option
-                    key={s.iso}
-                    value={s.time}
-                    disabled={s.busy || isPast(s.iso)}
-                  >
-                    {s.time} {s.busy || isPast(s.iso) ? " (unavailable)" : ""}
-                  </option>
-                ))}
+                {availableSlots.map((s) => {
+                  // send HH:MM in user's local time to backend
+                  const hhmm = isoToLocalHHMM(s.iso); // "14:00"
+                  const disabled = s.busy || isPast(s.iso);
+                  return (
+                    <option key={s.iso} value={hhmm} disabled={disabled}>
+                      {displayFromISO(s.iso)} {disabled ? " (unavailable)" : ""}
+                    </option>
+                  );
+                })}
               </select>
             )}
           </label>
