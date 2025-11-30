@@ -1,10 +1,45 @@
 // /api/book.js
 import { createClient } from "@supabase/supabase-js";
+import nodemailer from "nodemailer";
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
+
+// ---- Email helper ----
+async function sendBookingEmails({ name, email, date, time, zoomLink }) {
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
+
+  const dateTime = `${date} at ${time}`;
+
+  // Email to participant
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM,
+    to: email,
+    subject: `Your Zoom Zone Meeting - ${dateTime}`,
+    html: `<p>Hi ${name},</p>
+           <p>Your meeting is scheduled for <strong>${dateTime}</strong>.</p>
+           <p>Join Zoom meeting: <a href="${zoomLink}">${zoomLink}</a></p>
+           <p>Thanks,<br/>Zoom Zone</p>`,
+  });
+
+  // Email to yourself
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM,
+    to: process.env.EMAIL_FROM,
+    subject: `New Booking - ${dateTime}`,
+    html: `<p>New meeting booked by <strong>${name}</strong> (${email})</p>
+           <p>Scheduled for <strong>${dateTime}</strong>.</p>
+           <p>Zoom link: <a href="${zoomLink}">${zoomLink}</a></p>`,
+  });
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -59,7 +94,9 @@ export default async function handler(req, res) {
       const tokenData = await tokenRes.json();
 
       if (tokenData.error) {
-        throw new Error("Failed to refresh Zoom token: " + JSON.stringify(tokenData));
+        throw new Error(
+          "Failed to refresh Zoom token: " + JSON.stringify(tokenData)
+        );
       }
 
       // Update Supabase with new tokens
@@ -96,8 +133,7 @@ export default async function handler(req, res) {
         }),
       });
 
-      const zoomData = await zoomRes.json();
-      return zoomData;
+      return await zoomRes.json();
     };
 
     let zoomData = await createZoomMeeting(zoomAccessToken);
@@ -115,7 +151,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2️⃣ Create Google Calendar event
+    // ---- Create Google Calendar event ----
     const googleRes = await fetch(
       "https://www.googleapis.com/calendar/v3/calendars/primary/events",
       {
@@ -136,6 +172,10 @@ export default async function handler(req, res) {
 
     const googleData = await googleRes.json();
 
+    // ---- Send Emails ----
+    await sendBookingEmails({ name, email, date, time, zoomLink: zoomData.join_url });
+
+    // ---- Respond to frontend ----
     return res.status(200).json({
       message: "Booking successful!",
       zoomLink: zoomData.join_url,
