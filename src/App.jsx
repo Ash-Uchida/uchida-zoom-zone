@@ -32,14 +32,13 @@ export default function App() {
     const slots = [];
     const now = new Date();
     const start = new Date(selectedDate);
-    start.setHours(6, 0, 0, 0); // 6:00 AM
+    start.setHours(6, 0, 0, 0);
     const end = new Date(selectedDate);
-    end.setHours(22, 0, 0, 0); // 10:00 PM
+    end.setHours(22, 0, 0, 0);
 
     let slotTime = new Date(start);
 
     while (slotTime <= end) {
-      // skip past times if today
       if (slotTime > now || slotTime.toDateString() !== now.toDateString()) {
         const hh = slotTime.getHours().toString().padStart(2, "0");
         const mm = slotTime.getMinutes().toString().padStart(2, "0");
@@ -51,10 +50,12 @@ export default function App() {
     return slots;
   };
 
-  // Fetch busy times from Google Calendar
+  // Fetch busy times from Google Calendar (with polling every 10 seconds)
   useEffect(() => {
     if (!selectedDate) return;
     setLoadingSlots(true);
+
+    let intervalId;
 
     const fetchBusyTimes = async () => {
       try {
@@ -82,7 +83,13 @@ export default function App() {
       }
     };
 
+    // Initial fetch
     fetchBusyTimes();
+
+    // Poll every 10 seconds
+    intervalId = setInterval(fetchBusyTimes, 10000);
+
+    return () => clearInterval(intervalId);
   }, [selectedDate, duration]);
 
   const handleSubmit = async (e) => {
