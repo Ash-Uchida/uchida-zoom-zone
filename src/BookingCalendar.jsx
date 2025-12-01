@@ -1,13 +1,9 @@
+// src/BookingCalendar.jsx
 import React, { useEffect, useState } from "react";
 
 export default function BookingCalendar({ selectedDate, onSelectDate }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    // No need to fetch busy dates for UI; we are showing all days normally
-    // Busy times are now handled in App.jsx for the dropdown
-  }, [currentMonth]);
 
   const endOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
   const daysInMonth = Array.from({ length: endOfMonth.getDate() }, (_, i) =>
@@ -43,8 +39,7 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
 
         {daysInMonth.map((date) => {
           const isoDate = date.toISOString().split("T")[0];
-          const isSelected =
-            selectedDate && isoDate === selectedDate.toISOString().split("T")[0];
+          const isSelected = selectedDate && isoDate === selectedDate.toISOString().split("T")[0];
 
           return (
             <div
@@ -53,7 +48,7 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
               onClick={() => handleSelectDate(date)}
               style={{
                 cursor: "pointer",
-                opacity: 1, // all days look normal
+                opacity: 1, // All days look the same; no fading for busy days
               }}
             >
               {date.getDate()}

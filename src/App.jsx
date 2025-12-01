@@ -1,3 +1,4 @@
+// src/App.jsx
 import { useState, useEffect } from "react";
 import "./App.css";
 import BookingCalendar from "./BookingCalendar";
@@ -18,8 +19,8 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState(null);
   const [availableSlots, setAvailableSlots] = useState([]);
+  const [busySlots, setBusySlots] = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
-  const [busyTimes, setBusyTimes] = useState([]); // ISO times that are already booked
 
   const handleSelectDate = (date) => {
     if (!date) return;
@@ -28,6 +29,7 @@ export default function App() {
     setTime("");
   };
 
+  // Generate all possible timeslots (6 AM - 10 PM) based on duration
   const generateTimeSlots = (durationMinutes = 15) => {
     const slots = [];
     const now = new Date();
@@ -37,7 +39,6 @@ export default function App() {
     end.setHours(22, 0, 0, 0); // 10:00 PM
 
     let slotTime = new Date(start);
-
     while (slotTime <= end) {
       if (slotTime > now || slotTime.toDateString() !== now.toDateString()) {
         const hh = slotTime.getHours().toString().padStart(2, "0");
@@ -50,39 +51,33 @@ export default function App() {
     return slots;
   };
 
+  // Fetch busy times for the selected date
   useEffect(() => {
     if (!selectedDate) return;
-    setLoadingSlots(true);
 
-    const fetchSlots = async () => {
+    const fetchBusyTimes = async () => {
+      setLoadingSlots(true);
+      setTime("");
       try {
-        // Generate all time slots
-        const slots = generateTimeSlots(duration);
-
-        // Fetch busy times for selected date
         const dateFormatted = selectedDate.toISOString().split("T")[0];
-        const res = await fetch(`/api/calendar/freebusy?date=${dateFormatted}`);
+        const res = await fetch(`/api/calendar/busy?date=${dateFormatted}`);
         const data = await res.json();
+        const busy = data.busyTimes || [];
+        setBusySlots(busy);
 
-        const busy = (data.bookings || []).map((b) => new Date(b.time).toISOString());
-        setBusyTimes(busy);
-
-        // Keep all slots but mark busy ones
-        const slotsWithStatus = slots.map((s) => ({
-          ...s,
-          busy: busy.includes(s.iso),
-        }));
-
-        setAvailableSlots(slotsWithStatus);
+        // Generate all slots and mark which are busy
+        const allSlots = generateTimeSlots(duration);
+        setAvailableSlots(allSlots);
       } catch (err) {
-        console.error(err);
-        setAvailableSlots([]);
+        console.error("Failed to fetch busy times:", err);
+        setAvailableSlots(generateTimeSlots(duration));
+        setBusySlots([]);
       } finally {
         setLoadingSlots(false);
       }
     };
 
-    fetchSlots();
+    fetchBusyTimes();
   }, [selectedDate, duration]);
 
   const handleSubmit = async (e) => {
@@ -144,8 +139,13 @@ export default function App() {
               <select value={time} onChange={(e) => setTime(e.target.value)} required>
                 <option value="">Select a time</option>
                 {availableSlots.map((s) => (
-                  <option key={s.iso} value={s.time} disabled={s.busy}>
-                    {s.time} {s.busy ? "(Unavailable)" : ""}
+                  <option
+                    key={s.iso}
+                    value={s.time}
+                    disabled={busySlots.includes(s.iso)}
+                    style={{ color: busySlots.includes(s.iso) ? "#999" : "#000" }}
+                  >
+                    {s.time}{busySlots.includes(s.iso) ? " (Unavailable)" : ""}
                   </option>
                 ))}
               </select>
@@ -155,17 +155,13 @@ export default function App() {
           <label>
             Duration (minutes):
             <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-              {[15, 30, 45, 60].map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
+              {[15, 30, 45, 60].map(d => (
+                <option key={d} value={d}>{d}</option>
               ))}
             </select>
           </label>
 
-          <button type="submit" className="submit-btn">
-            Book Meeting
-          </button>
+          <button type="submit" className="submit-btn">Book Meeting</button>
         </form>
       )}
 
