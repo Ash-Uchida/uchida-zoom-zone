@@ -1,4 +1,3 @@
-// src/App.jsx
 import { useState, useEffect } from "react";
 import "./App.css";
 import BookingCalendar from "./BookingCalendar";
@@ -13,11 +12,12 @@ export default function App() {
     return null;
   });
 
-  const [time, setTime] = useState("");
+  const [selectedTimeIso, setSelectedTimeIso] = useState(""); // ISO string of selected time
   const [duration, setDuration] = useState(15);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState(null);
+
   const [availableSlots, setAvailableSlots] = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
 
@@ -26,7 +26,7 @@ export default function App() {
     const isoDate = date.toISOString().split("T")[0];
     setSelectedDate(date);
     localStorage.setItem("selectedDate", isoDate);
-    setTime("");
+    setSelectedTimeIso(""); // reset time
   };
 
   useEffect(() => {
@@ -42,12 +42,17 @@ export default function App() {
         const res = await fetch(`/api/calendar/timeslots?date=${dateFormatted}&duration=${duration}`);
         const data = await res.json();
 
-        // Filter out past times
         const now = new Date();
-        const slots = (data.slots || []).map(s => ({
-          ...s,
-          busy: new Date(s.iso) < now,
-        }));
+        const slots = (data.slots || [])
+          .map((s) => ({
+            ...s,
+            busy: new Date(s.iso) < now,
+          }))
+          // Filter slots 6 AM - 10 PM
+          .filter((s) => {
+            const hour = new Date(s.iso).getHours();
+            return hour >= 6 && hour <= 22;
+          });
 
         setAvailableSlots(slots);
       } catch (err) {
@@ -63,18 +68,25 @@ export default function App() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedDate || !time || !name || !email) {
+    if (!selectedDate || !selectedTimeIso || !name || !email) {
       setStatus("Please fill out all fields.");
       return;
     }
 
-    const dateFormatted = selectedDate.toISOString().split("T")[0];
+    const timeDate = new Date(selectedTimeIso);
+    if (isNaN(timeDate)) {
+      setStatus("Error: Invalid date or time.");
+      return;
+    }
+
+    const datePart = timeDate.toISOString().split("T")[0];
+    const timePart = timeDate.toISOString().split("T")[1].substring(0, 5); // HH:MM
 
     try {
       const res = await fetch("/api/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, date: dateFormatted, time, duration }),
+        body: JSON.stringify({ name, email, date: datePart, time: timePart, duration }),
       });
 
       const data = await res.json();
@@ -117,11 +129,16 @@ export default function App() {
             ) : availableSlots.length === 0 ? (
               <div>No available times for this date.</div>
             ) : (
-              <select value={time} onChange={(e) => setTime(e.target.value)} required>
+              <select
+                value={selectedTimeIso}
+                onChange={(e) => setSelectedTimeIso(e.target.value)}
+                required
+              >
                 <option value="">Select a time</option>
                 {availableSlots.map((s) => (
-                  <option key={s.iso} value={s.time} disabled={s.busy}>
-                    {s.time} {s.busy ? "(unavailable)" : ""}
+                  <option key={s.iso} value={s.iso} disabled={s.busy}>
+                    {new Date(s.iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {s.busy ? " (unavailable)" : ""}
                   </option>
                 ))}
               </select>
@@ -131,13 +148,17 @@ export default function App() {
           <label>
             Duration (minutes):
             <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-              {[15, 30, 45, 60].map(d => (
-                <option key={d} value={d}>{d}</option>
+              {[15, 30, 45, 60].map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
               ))}
             </select>
           </label>
 
-          <button type="submit" className="submit-btn">Book Meeting</button>
+          <button type="submit" className="submit-btn">
+            Book Meeting
+          </button>
         </form>
       )}
 
