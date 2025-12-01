@@ -1,3 +1,4 @@
+// api/book.js
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 
@@ -95,6 +96,13 @@ async function refreshZoomToken(refreshToken) {
   return tokenData.access_token;
 }
 
+// ---- Helper to convert Date to local ISO without Z ----
+function toLocalISOString(date) {
+  const tzOffset = date.getTimezoneOffset() * 60000; // in ms
+  const localISO = new Date(date.getTime() - tzOffset).toISOString().slice(0, 19);
+  return localISO;
+}
+
 // ---- API handler ----
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -106,25 +114,23 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // --- Build start/end times ---
-    const [hours, minutes] = time.split(":").map(Number);
-    const startTime = new Date(date);
-    startTime.setHours(hours, minutes, 0, 0);
+    // Build dateTime object in local time
+    const [hour, minute] = time.split(":").map(Number);
+    const dateTime = new Date(date);
+    dateTime.setHours(hour, minute, 0, 0);
 
-    if (isNaN(startTime.getTime())) {
-      return res.status(400).json({ error: "Invalid date or time" });
-    }
+    // Compute end time
+    const endTime = new Date(dateTime.getTime() + Number(duration) * 60000);
 
-    const endTime = new Date(startTime.getTime() + duration * 60000).toISOString();
+    // Fetch tokens
+    const { data: tokensData, error: tokensError } = await supabase.from("integrations").select("*");
+    if (tokensError) throw new Error("Failed to fetch integrations: " + JSON.stringify(tokensError));
 
-    // --- Fetch integration tokens ---
-    const { data: tokensData } = await supabase.from("integrations").select("*");
-    let zoom = tokensData.find((t) => t.id === "zoom");
-    let google = tokensData.find((t) => t.id === "google");
-
+    const zoom = tokensData.find((t) => t.id === "zoom");
+    const google = tokensData.find((t) => t.id === "google");
     if (!zoom || !google) return res.status(500).json({ error: "Missing Zoom or Google tokens" });
 
-    // --- Create Zoom meeting ---
+    // ---- Create Zoom meeting ----
     let zoomAccessToken = zoom.access_token;
     const createZoomMeeting = async (token) => {
       const zoomRes = await fetch("https://api.zoom.us/v2/users/me/meetings", {
@@ -133,7 +139,7 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           topic: `Meeting with ${name}`,
           type: 2,
-          start_time: startTime.toISOString(),
+          start_time: dateTime.toISOString(),
           duration: Number(duration),
         }),
       });
@@ -141,21 +147,23 @@ export default async function handler(req, res) {
     };
 
     let zoomData = await createZoomMeeting(zoomAccessToken);
-    if (!zoomData.join_url) {
+    if ((!zoomData.join_url && zoomData.code) || [124, 1241].includes(zoomData.code)) {
       zoomAccessToken = await refreshZoomToken(zoom.refresh_token);
       zoomData = await createZoomMeeting(zoomAccessToken);
     }
-    if (!zoomData.join_url) return res.status(500).json({ error: "Zoom meeting creation failed" });
+    if (!zoomData.join_url)
+      return res.status(500).json({ error: "Zoom meeting creation failed", details: zoomData });
 
-    // --- Create Google Calendar event ---
+    // ---- Create Google Calendar event (local time) ----
     let googleAccessToken = google.access_token;
+    const timezone = "America/Denver"; // replace with your local timezone
     let googleRes = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
       method: "POST",
       headers: { Authorization: `Bearer ${googleAccessToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         summary: `Zoom Meeting with ${name}`,
-        start: { dateTime: startTime.toISOString() },
-        end: { dateTime: endTime },
+        start: { dateTime: toLocalISOString(dateTime), timeZone: timezone },
+        end: { dateTime: toLocalISOString(endTime), timeZone: timezone },
         attendees: [{ email }],
         description: `Join Zoom: ${zoomData.join_url}`,
       }),
@@ -168,8 +176,8 @@ export default async function handler(req, res) {
         headers: { Authorization: `Bearer ${googleAccessToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           summary: `Zoom Meeting with ${name}`,
-          start: { dateTime: startTime.toISOString() },
-          end: { dateTime: endTime },
+          start: { dateTime: toLocalISOString(dateTime), timeZone: timezone },
+          end: { dateTime: toLocalISOString(endTime), timeZone: timezone },
           attendees: [{ email }],
           description: `Join Zoom: ${zoomData.join_url}`,
         }),
@@ -177,17 +185,18 @@ export default async function handler(req, res) {
     }
 
     const googleData = await googleRes.json();
-    if (!googleData.id) return res.status(500).json({ error: "Google Calendar event failed" });
+    if (!googleData.id)
+      return res.status(500).json({ error: "Google Calendar event failed", details: googleData });
 
-    // --- Save booking to Supabase ---
+    // ---- Save booking to Supabase ----
     const { data: bookingData, error: bookingError } = await supabase
       .from("bookings")
       .insert([
         {
           name,
           email,
-          time: startTime.toISOString(),
-          end_time: endTime,
+          time: dateTime.toISOString(),
+          end_time: endTime.toISOString(),
           duration: Number(duration),
           zoom_link: zoomData.join_url,
           created_at: new Date().toISOString(),
@@ -195,13 +204,14 @@ export default async function handler(req, res) {
       ])
       .select();
 
-    if (bookingError) return res.status(500).json({ error: "Failed to save booking" });
+    if (bookingError)
+      return res.status(500).json({ error: "Failed to save booking", details: bookingError });
 
-    // --- Send emails ---
+    // ---- Send emails ----
     await sendBookingEmails({
       name,
       email,
-      dateTime: startTime.toISOString(),
+      dateTime: dateTime.toISOString(),
       zoomLink: zoomData.join_url,
       duration: Number(duration),
     });
@@ -212,7 +222,6 @@ export default async function handler(req, res) {
       googleEventId: googleData.id,
       supabaseBookingId: bookingData[0].id,
     });
-
   } catch (err) {
     console.error("Unexpected /api/book error:", err);
     return res.status(500).json({ error: "Server error", details: String(err) });
