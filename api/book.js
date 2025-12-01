@@ -1,4 +1,3 @@
-// api/book.js
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 
@@ -174,7 +173,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Zoom meeting creation failed", details: zoomData });
 
     // ---- Create Google Calendar event ----
-    const timezone = "America/Denver";
+    const timezone = "America/Denver"; // replace with your local timezone
     let googleRes = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
       method: "POST",
       headers: { Authorization: `Bearer ${googleAccessToken}`, "Content-Type": "application/json" },
@@ -224,20 +223,6 @@ export default async function handler(req, res) {
 
     if (bookingError)
       return res.status(500).json({ error: "Failed to save booking", details: bookingError });
-
-    // ---- Add reminder 15 minutes before ----
-    const reminderTime = new Date(dateTime.getTime() - 15 * 60000); // 15 min before
-    await supabase.from("reminders").insert([
-      {
-        booking_id: bookingData[0].id,
-        name,
-        email,
-        meeting_time: dateTime.toISOString(),
-        zoom_link: zoomData.join_url,
-        reminder_time: reminderTime.toISOString(),
-        sent: false,
-      },
-    ]);
 
     // ---- Send emails ----
     await sendBookingEmails({
