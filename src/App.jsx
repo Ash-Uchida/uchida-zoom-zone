@@ -41,10 +41,7 @@ export default function App() {
 
     while (slotTime <= end) {
       // skip past times if today
-      if (
-        slotTime > now ||
-        slotTime.toDateString() !== now.toDateString()
-      ) {
+      if (slotTime > now || slotTime.toDateString() !== now.toDateString()) {
         const hh = slotTime.getHours().toString().padStart(2, "0");
         const mm = slotTime.getMinutes().toString().padStart(2, "0");
         slots.push({ time: `${hh}:${mm}`, iso: slotTime.toISOString() });
@@ -121,14 +118,15 @@ export default function App() {
             ) : availableSlots.length === 0 ? (
               <div>No available times for this date.</div>
             ) : (
-              <select value={time} onChange={(e) => setTime(e.target.value)} required>
-                <option value="">Select a time</option>
-                {availableSlots.map((s) => (
-                  <option key={s.iso} value={s.time}>
-                    {s.time}
-                  </option>
-                ))}
-              </select>
+              <input
+                type="time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                required
+                step={900} // 15 minutes
+                min="06:00"
+                max="22:00"
+              />
             )}
           </label>
 
