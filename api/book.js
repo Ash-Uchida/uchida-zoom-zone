@@ -30,7 +30,7 @@ async function sendBookingEmails({ name, email, dateTime, zoomLink, duration }) 
            <p>Thanks,<br/>Zoom Zone</p>`,
   });
 
-  // Email to yourself (owner)
+  // Email to owner
   await transporter.sendMail({
     from: process.env.EMAIL_FROM,
     to: process.env.EMAIL_FROM,
@@ -57,7 +57,6 @@ async function refreshGoogleToken(refreshToken) {
   const data = await res.json();
   if (data.error) throw new Error("Google token refresh failed: " + JSON.stringify(data));
 
-  // Update Supabase
   await supabase.from("integrations").upsert({
     id: "google",
     access_token: data.access_token,
@@ -87,7 +86,6 @@ async function refreshZoomToken(refreshToken) {
   const tokenData = await tokenRes.json();
   if (tokenData.error) throw new Error("Zoom token refresh failed: " + JSON.stringify(tokenData));
 
-  // Update Supabase
   await supabase.from("integrations").upsert({
     id: "zoom",
     access_token: tokenData.access_token,
@@ -98,7 +96,7 @@ async function refreshZoomToken(refreshToken) {
   return tokenData.access_token;
 }
 
-// ---- Main handler ----
+// ---- API handler ----
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
@@ -106,24 +104,26 @@ export default async function handler(req, res) {
     const { name, email, date, time, duration = 15 } = req.body;
 
     if (!name || !email || !date || !time) {
+      console.log("Missing fields:", { name, email, date, time });
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Validate date & time
-    const dateTimeObj = new Date(`${date}T${time}:00`);
-    if (isNaN(dateTimeObj.getTime())) {
+    // Validate and build ISO timestamp
+    const dateTimeStr = `${date}T${time.padStart(5, "0")}:00`;
+    const dateTime = new Date(dateTimeStr);
+    if (isNaN(dateTime.getTime())) {
+      console.log("Invalid dateTime:", dateTimeStr);
       return res.status(400).json({ error: "Invalid date or time" });
     }
 
-    const dateTime = dateTimeObj.toISOString();
-    const endTime = new Date(dateTimeObj.getTime() + Number(duration) * 60000).toISOString();
+    const endTime = new Date(dateTime.getTime() + Number(duration) * 60000).toISOString();
 
     // Fetch tokens
     const { data: tokensData, error: tokensError } = await supabase.from("integrations").select("*");
     if (tokensError) throw new Error("Failed to fetch integrations: " + JSON.stringify(tokensError));
 
-    const zoom = tokensData.find((t) => t.id === "zoom");
-    const google = tokensData.find((t) => t.id === "google");
+    let zoom = tokensData.find((t) => t.id === "zoom");
+    let google = tokensData.find((t) => t.id === "google");
     if (!zoom || !google) return res.status(500).json({ error: "Missing Zoom or Google tokens" });
 
     // Create Zoom meeting
@@ -131,14 +131,11 @@ export default async function handler(req, res) {
     const createZoomMeeting = async (token) => {
       const zoomRes = await fetch("https://api.zoom.us/v2/users/me/meetings", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           topic: `Meeting with ${name}`,
           type: 2,
-          start_time: dateTime,
+          start_time: dateTime.toISOString(),
           duration: Number(duration),
         }),
       });
@@ -146,26 +143,21 @@ export default async function handler(req, res) {
     };
 
     let zoomData = await createZoomMeeting(zoomAccessToken);
-    if ((!zoomData.join_url && zoomData.code) || (zoomData.code === 124 || zoomData.code === 1241)) {
+    if ((!zoomData.join_url && zoomData.code) || [124, 1241].includes(zoomData.code)) {
       zoomAccessToken = await refreshZoomToken(zoom.refresh_token);
       zoomData = await createZoomMeeting(zoomAccessToken);
     }
-
-    if (!zoomData.join_url) {
+    if (!zoomData.join_url)
       return res.status(500).json({ error: "Zoom meeting creation failed", details: zoomData });
-    }
 
     // Create Google Calendar event
     let googleAccessToken = google.access_token;
     let googleRes = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${googleAccessToken}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: `Bearer ${googleAccessToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         summary: `Zoom Meeting with ${name}`,
-        start: { dateTime },
+        start: { dateTime: dateTime.toISOString() },
         end: { dateTime: endTime },
         attendees: [{ email }],
         description: `Join Zoom: ${zoomData.join_url}`,
@@ -176,13 +168,10 @@ export default async function handler(req, res) {
       googleAccessToken = await refreshGoogleToken(google.refresh_token);
       googleRes = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${googleAccessToken}`,
-          "Content-Type": "application/json",
-        },
+        headers: { Authorization: `Bearer ${googleAccessToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           summary: `Zoom Meeting with ${name}`,
-          start: { dateTime },
+          start: { dateTime: dateTime.toISOString() },
           end: { dateTime: endTime },
           attendees: [{ email }],
           description: `Join Zoom: ${zoomData.join_url}`,
@@ -191,7 +180,8 @@ export default async function handler(req, res) {
     }
 
     const googleData = await googleRes.json();
-    if (!googleData.id) return res.status(500).json({ error: "Google Calendar event failed", details: googleData });
+    if (!googleData.id)
+      return res.status(500).json({ error: "Google Calendar event failed", details: googleData });
 
     // Save booking to Supabase
     const { data: bookingData, error: bookingError } = await supabase
@@ -200,7 +190,7 @@ export default async function handler(req, res) {
         {
           name,
           email,
-          time: dateTime,
+          time: dateTime.toISOString(),
           end_time: endTime,
           duration: Number(duration),
           zoom_link: zoomData.join_url,
@@ -209,18 +199,18 @@ export default async function handler(req, res) {
       ])
       .select();
 
-    if (bookingError) return res.status(500).json({ error: "Failed to save booking", details: bookingError });
+    if (bookingError)
+      return res.status(500).json({ error: "Failed to save booking", details: bookingError });
 
     // Send emails
     await sendBookingEmails({
       name,
       email,
-      dateTime,
+      dateTime: dateTime.toISOString(),
       zoomLink: zoomData.join_url,
       duration: Number(duration),
     });
 
-    // Respond
     return res.status(200).json({
       message: "Booking successful!",
       zoomLink: zoomData.join_url,

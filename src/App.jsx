@@ -23,45 +23,46 @@ export default function App() {
 
   const handleSelectDate = (date) => {
     if (!date) return;
-    const isoDate = date.toISOString().split("T")[0];
     setSelectedDate(date);
-    localStorage.setItem("selectedDate", isoDate);
+    localStorage.setItem("selectedDate", date.toISOString());
     setTime("");
   };
 
+  // Generate timeslots from 6am to 10pm
+  const generateTimeSlots = (durationMinutes = 15) => {
+    const slots = [];
+    const now = new Date();
+    const start = new Date(selectedDate);
+    start.setHours(6, 0, 0, 0); // 6:00 AM
+    const end = new Date(selectedDate);
+    end.setHours(22, 0, 0, 0); // 10:00 PM
+
+    let slotTime = new Date(start);
+
+    while (slotTime <= end) {
+      // skip past times if today
+      if (
+        slotTime > now ||
+        slotTime.toDateString() !== now.toDateString()
+      ) {
+        const hh = slotTime.getHours().toString().padStart(2, "0");
+        const mm = slotTime.getMinutes().toString().padStart(2, "0");
+        slots.push({ time: `${hh}:${mm}`, iso: slotTime.toISOString() });
+      }
+      slotTime = new Date(slotTime.getTime() + durationMinutes * 60000);
+    }
+
+    return slots;
+  };
+
   useEffect(() => {
-    const fetchSlots = async () => {
-      if (!selectedDate) {
-        setAvailableSlots([]);
-        return;
-      }
+    if (!selectedDate) return;
+    setLoadingSlots(true);
 
-      setLoadingSlots(true);
-      try {
-        const dateFormatted = selectedDate.toISOString().split("T")[0];
-        const res = await fetch(`/api/calendar/timeslots?date=${dateFormatted}&duration=${duration}`);
-        const data = await res.json();
-
-        // Filter only slots between 6 AM and 10 PM
-        const slots = (data.slots || []).map((s) => {
-          const slotHour = new Date(s.iso).getHours();
-          const isBusy = new Date(s.iso) < new Date();
-          return {
-            ...s,
-            busy: isBusy || slotHour < 6 || slotHour > 22,
-          };
-        });
-
-        setAvailableSlots(slots);
-      } catch (err) {
-        console.error("Failed to fetch timeslots:", err);
-        setAvailableSlots([]);
-      } finally {
-        setLoadingSlots(false);
-      }
-    };
-
-    fetchSlots();
+    // simulate fetching available slots
+    const slots = generateTimeSlots(duration);
+    setAvailableSlots(slots);
+    setLoadingSlots(false);
   }, [selectedDate, duration]);
 
   const handleSubmit = async (e) => {
@@ -71,9 +72,9 @@ export default function App() {
       return;
     }
 
-    const dateFormatted = selectedDate.toISOString().split("T")[0];
-
     try {
+      const dateFormatted = selectedDate.toISOString().split("T")[0];
+
       const res = await fetch("/api/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -81,8 +82,8 @@ export default function App() {
       });
 
       const data = await res.json();
-      if (data.error) setStatus("Error: " + data.error);
-      else setStatus(`Booking successful! Zoom Link: ${data.zoomLink}`);
+      if (res.status !== 200) setStatus("Error: " + data.error);
+      else setStatus(`Booking successful! ID: ${data.supabaseBookingId}`);
     } catch (err) {
       console.error(err);
       setStatus("Something went wrong.");
@@ -105,14 +106,12 @@ export default function App() {
             placeholder="Your name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            required
           />
           <input
             type="email"
             placeholder="Your email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            required
           />
 
           <label>
@@ -125,8 +124,8 @@ export default function App() {
               <select value={time} onChange={(e) => setTime(e.target.value)} required>
                 <option value="">Select a time</option>
                 {availableSlots.map((s) => (
-                  <option key={s.iso} value={s.time} disabled={s.busy}>
-                    {s.time} {s.busy ? "(unavailable)" : ""}
+                  <option key={s.iso} value={s.time}>
+                    {s.time}
                   </option>
                 ))}
               </select>
@@ -136,17 +135,13 @@ export default function App() {
           <label>
             Duration (minutes):
             <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-              {[15, 30, 45, 60].map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
+              {[15, 30, 45, 60].map(d => (
+                <option key={d} value={d}>{d}</option>
               ))}
             </select>
           </label>
 
-          <button type="submit" className="submit-btn">
-            Book Meeting
-          </button>
+          <button type="submit" className="submit-btn">Book Meeting</button>
         </form>
       )}
 
