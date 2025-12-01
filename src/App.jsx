@@ -14,7 +14,7 @@ export default function App() {
   });
 
   const [time, setTime] = useState("");
-  const [duration, setDuration] = useState(15);
+  const [duration, setDuration] = useState(15); // default duration
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState(null);
@@ -25,11 +25,12 @@ export default function App() {
     if (!date) return;
     setSelectedDate(date);
     localStorage.setItem("selectedDate", date.toISOString());
-    setTime("");
+    setTime(""); // reset selected time when date changes
   };
 
-  // Generate timeslots from 6am to 10pm
+  // Generate time slots from 6 AM to 10 PM in 15-minute increments
   const generateTimeSlots = (durationMinutes = 15) => {
+    if (!selectedDate) return [];
     const slots = [];
     const now = new Date();
     const start = new Date(selectedDate);
@@ -38,28 +39,25 @@ export default function App() {
     end.setHours(22, 0, 0, 0); // 10:00 PM
 
     let slotTime = new Date(start);
-
     while (slotTime <= end) {
-      // skip past times if today
-      if (
-        slotTime > now ||
-        slotTime.toDateString() !== now.toDateString()
-      ) {
+      // Skip past times if today
+      if (slotTime > now || slotTime.toDateString() !== now.toDateString()) {
         const hh = slotTime.getHours().toString().padStart(2, "0");
         const mm = slotTime.getMinutes().toString().padStart(2, "0");
         slots.push({ time: `${hh}:${mm}`, iso: slotTime.toISOString() });
       }
       slotTime = new Date(slotTime.getTime() + durationMinutes * 60000);
     }
-
     return slots;
   };
 
+  // Update available slots whenever date or duration changes
   useEffect(() => {
-    if (!selectedDate) return;
+    if (!selectedDate) {
+      setAvailableSlots([]);
+      return;
+    }
     setLoadingSlots(true);
-
-    // simulate fetching available slots
     const slots = generateTimeSlots(duration);
     setAvailableSlots(slots);
     setLoadingSlots(false);
@@ -74,7 +72,6 @@ export default function App() {
 
     try {
       const dateFormatted = selectedDate.toISOString().split("T")[0];
-
       const res = await fetch("/api/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -135,7 +132,7 @@ export default function App() {
           <label>
             Duration (minutes):
             <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-              {[15, 30, 45, 60].map(d => (
+              {[15, 30, 45, 60].map((d) => (
                 <option key={d} value={d}>{d}</option>
               ))}
             </select>
