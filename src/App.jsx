@@ -1,3 +1,4 @@
+// src/App.jsx
 import { useState, useEffect } from "react";
 import "./App.css";
 import BookingCalendar from "./BookingCalendar";
@@ -28,31 +29,43 @@ export default function App() {
   };
 
   // Generate timeslots from 6am to 10pm
-  const generateTimeSlots = () => {
+  const generateTimeSlots = (durationMinutes = 15) => {
     const slots = [];
     const now = new Date();
     const start = new Date(selectedDate);
-    start.setHours(6, 0, 0, 0);
+    start.setHours(6, 0, 0, 0); // 6:00 AM
     const end = new Date(selectedDate);
-    end.setHours(22, 0, 0, 0);
+    end.setHours(22, 0, 0, 0); // 10:00 PM
 
     let slotTime = new Date(start);
+
     while (slotTime <= end) {
-      if (slotTime > now || slotTime.toDateString() !== now.toDateString()) {
+      // skip past times if today
+      if (
+        slotTime > now ||
+        slotTime.toDateString() !== now.toDateString()
+      ) {
         const hh = slotTime.getHours().toString().padStart(2, "0");
         const mm = slotTime.getMinutes().toString().padStart(2, "0");
         slots.push({ time: `${hh}:${mm}`, iso: slotTime.toISOString() });
       }
-      slotTime = new Date(slotTime.getTime() + duration * 60000);
+      slotTime = new Date(slotTime.getTime() + durationMinutes * 60000);
     }
+
     return slots;
   };
 
   useEffect(() => {
     if (!selectedDate) return;
     setLoadingSlots(true);
-    const slots = generateTimeSlots();
-    setAvailableSlots(slots);
+
+    // simulate fetching available slots
+    const slots = generateTimeSlots(duration);
+
+    // Remove busy slots (assuming your BookingCalendar or API provides `busy` flags)
+    const freeSlots = slots.filter((s) => !s.busy);
+
+    setAvailableSlots(freeSlots);
     setLoadingSlots(false);
   }, [selectedDate, duration]);
 
@@ -74,7 +87,7 @@ export default function App() {
 
       const data = await res.json();
       if (res.status !== 200) setStatus("Error: " + data.error);
-      else setStatus(`Booking successful! Zoom Link: ${data.zoomLink}`);
+      else setStatus(`Booking successful! ID: ${data.supabaseBookingId}`);
     } catch (err) {
       console.error(err);
       setStatus("Something went wrong.");
@@ -98,7 +111,6 @@ export default function App() {
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
-
           <input
             type="email"
             placeholder="Your email"
