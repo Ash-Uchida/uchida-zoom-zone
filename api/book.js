@@ -103,23 +103,31 @@ function toLocalISOString(date) {
   return localISO;
 }
 
+// ---- Check for double booking in Google Calendar ----
+async function isSlotBusy(googleAccessToken, dateTime, endTime) {
+  const startISO = dateTime.toISOString();
+  const endISO = endTime.toISOString();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${startISO}&timeMax=${endISO}&singleEvents=true`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${googleAccessToken}` },
+  });
+  const data = await res.json();
+  return data.items && data.items.length > 0;
+}
+
 // ---- API handler ----
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
     const { name, email, date, time, duration = 15 } = req.body;
-
     if (!name || !email || !date || !time) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Build dateTime object in local time
     const [hour, minute] = time.split(":").map(Number);
     const dateTime = new Date(date);
     dateTime.setHours(hour, minute, 0, 0);
-
-    // Compute end time
     const endTime = new Date(dateTime.getTime() + Number(duration) * 60000);
 
     // Fetch tokens
@@ -129,6 +137,17 @@ export default async function handler(req, res) {
     const zoom = tokensData.find((t) => t.id === "zoom");
     const google = tokensData.find((t) => t.id === "google");
     if (!zoom || !google) return res.status(500).json({ error: "Missing Zoom or Google tokens" });
+
+    // ---- Check Google Calendar for conflicts ----
+    let googleAccessToken = google.access_token;
+    let busy = await isSlotBusy(googleAccessToken, dateTime, endTime);
+    if (busy) {
+      googleAccessToken = await refreshGoogleToken(google.refresh_token);
+      busy = await isSlotBusy(googleAccessToken, dateTime, endTime);
+    }
+    if (busy) {
+      return res.status(409).json({ error: "Time slot is already booked in Google Calendar" });
+    }
 
     // ---- Create Zoom meeting ----
     let zoomAccessToken = zoom.access_token;
@@ -154,8 +173,7 @@ export default async function handler(req, res) {
     if (!zoomData.join_url)
       return res.status(500).json({ error: "Zoom meeting creation failed", details: zoomData });
 
-    // ---- Create Google Calendar event (local time) ----
-    let googleAccessToken = google.access_token;
+    // ---- Create Google Calendar event ----
     const timezone = "America/Denver"; // replace with your local timezone
     let googleRes = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
       method: "POST",
