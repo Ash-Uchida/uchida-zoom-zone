@@ -1,3 +1,4 @@
+// src/BookingCalendar.jsx
 import React, { useEffect, useState } from "react";
 
 export default function BookingCalendar({ selectedDate, onSelectDate }) {
@@ -13,12 +14,17 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
         const data = await res.json();
 
         const busy = [];
-        if (data.calendars?.primary?.busy) {
+        if (data.calendars && data.calendars.primary?.busy) {
           data.calendars.primary.busy.forEach((slot) => {
             const start = new Date(slot.start);
-            busy.push(start.toISOString().split("T")[0]);
+            const hour = start.getHours();
+            // Only count slots between 6 AM and 10 PM as busy
+            if (hour >= 6 && hour <= 22) {
+              busy.push(start.toISOString().split("T")[0]);
+            }
           });
         }
+
         setBusyDates(busy);
       } catch (err) {
         console.error("Failed to fetch busy dates:", err);
@@ -40,7 +46,10 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
   const handleNextMonth = () =>
     setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
 
-  const handleSelect = (date) => onSelectDate(date);
+  const handleSelectDate = (date) => {
+    if (!date) return;
+    onSelectDate(date);
+  };
 
   return (
     <div className="calendar-container">
@@ -61,18 +70,18 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
 
         {daysInMonth.map((date) => {
           const isoDate = date.toISOString().split("T")[0];
-          const isSelected =
-            selectedDate && isoDate === selectedDate.toISOString().split("T")[0];
+          const isSelected = selectedDate && isoDate === selectedDate.toISOString().split("T")[0];
           const isBusy = busyDates.includes(isoDate);
 
           return (
             <div
               key={isoDate}
-              className={`calendar-day ${isSelected ? "selected" : ""} ${
-                isBusy ? "busy" : ""
-              }`}
-              onClick={() => handleSelect(date)}
-              style={{ cursor: "pointer", opacity: isBusy ? 0.9 : 1 }}
+              className={`calendar-day ${isSelected ? "selected" : ""} ${isBusy ? "busy" : ""}`}
+              onClick={() => handleSelectDate(date)}
+              style={{
+                cursor: "pointer",
+                opacity: isBusy ? 0.5 : 1, // gray out days with no available slots
+              }}
             >
               {date.getDate()}
               {isBusy && <div style={{ fontSize: 10, marginTop: 6 }}>busy</div>}
