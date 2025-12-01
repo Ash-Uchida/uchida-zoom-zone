@@ -7,7 +7,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-// ---- Email helper ----
 async function sendReminderEmail({ name, email, dateTime, zoomLink }) {
   const transporter = nodemailer.createTransport({
     service: "gmail",
@@ -50,7 +49,6 @@ export default async function handler(req, res) {
         zoomLink: r.zoom_link,
       });
 
-      // Mark as sent
       await supabase
         .from("reminders")
         .update({ sent: true })

@@ -53,6 +53,7 @@ async function refreshGoogleToken(refreshToken) {
       grant_type: "refresh_token",
     }),
   });
+
   const data = await res.json();
   if (data.error) throw new Error("Google token refresh failed: " + JSON.stringify(data));
 
@@ -97,8 +98,9 @@ async function refreshZoomToken(refreshToken) {
 
 // ---- Helper to convert Date to local ISO without Z ----
 function toLocalISOString(date) {
-  const tzOffset = date.getTimezoneOffset() * 60000;
-  return new Date(date.getTime() - tzOffset).toISOString().slice(0, 19);
+  const tzOffset = date.getTimezoneOffset() * 60000; // in ms
+  const localISO = new Date(date.getTime() - tzOffset).toISOString().slice(0, 19);
+  return localISO;
 }
 
 // ---- Check for double booking in Google Calendar ----
@@ -106,7 +108,9 @@ async function isSlotBusy(googleAccessToken, dateTime, endTime) {
   const startISO = dateTime.toISOString();
   const endISO = endTime.toISOString();
   const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${startISO}&timeMax=${endISO}&singleEvents=true`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${googleAccessToken}` } });
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${googleAccessToken}` },
+  });
   const data = await res.json();
   return data.items && data.items.length > 0;
 }
@@ -117,8 +121,9 @@ export default async function handler(req, res) {
 
   try {
     const { name, email, date, time, duration = 15 } = req.body;
-    if (!name || !email || !date || !time)
+    if (!name || !email || !date || !time) {
       return res.status(400).json({ error: "Missing required fields" });
+    }
 
     const [hour, minute] = time.split(":").map(Number);
     const dateTime = new Date(date);
@@ -126,7 +131,9 @@ export default async function handler(req, res) {
     const endTime = new Date(dateTime.getTime() + Number(duration) * 60000);
 
     // Fetch tokens
-    const { data: tokensData } = await supabase.from("integrations").select("*");
+    const { data: tokensData, error: tokensError } = await supabase.from("integrations").select("*");
+    if (tokensError) throw new Error("Failed to fetch integrations: " + JSON.stringify(tokensError));
+
     const zoom = tokensData.find((t) => t.id === "zoom");
     const google = tokensData.find((t) => t.id === "google");
     if (!zoom || !google) return res.status(500).json({ error: "Missing Zoom or Google tokens" });
@@ -138,7 +145,9 @@ export default async function handler(req, res) {
       googleAccessToken = await refreshGoogleToken(google.refresh_token);
       busy = await isSlotBusy(googleAccessToken, dateTime, endTime);
     }
-    if (busy) return res.status(409).json({ error: "Time slot is already booked in Google Calendar" });
+    if (busy) {
+      return res.status(409).json({ error: "Time slot is already booked in Google Calendar" });
+    }
 
     // ---- Create Zoom meeting ----
     let zoomAccessToken = zoom.access_token;
@@ -157,11 +166,12 @@ export default async function handler(req, res) {
     };
 
     let zoomData = await createZoomMeeting(zoomAccessToken);
-    if (!zoomData.join_url) {
+    if ((!zoomData.join_url && zoomData.code) || [124, 1241].includes(zoomData.code)) {
       zoomAccessToken = await refreshZoomToken(zoom.refresh_token);
       zoomData = await createZoomMeeting(zoomAccessToken);
     }
-    if (!zoomData.join_url) return res.status(500).json({ error: "Zoom meeting creation failed" });
+    if (!zoomData.join_url)
+      return res.status(500).json({ error: "Zoom meeting creation failed", details: zoomData });
 
     // ---- Create Google Calendar event ----
     const timezone = "America/Denver";
@@ -193,7 +203,8 @@ export default async function handler(req, res) {
     }
 
     const googleData = await googleRes.json();
-    if (!googleData.id) return res.status(500).json({ error: "Google Calendar event failed" });
+    if (!googleData.id)
+      return res.status(500).json({ error: "Google Calendar event failed", details: googleData });
 
     // ---- Save booking to Supabase ----
     const { data: bookingData, error: bookingError } = await supabase
@@ -211,10 +222,11 @@ export default async function handler(req, res) {
       ])
       .select();
 
-    if (bookingError) return res.status(500).json({ error: "Failed to save booking" });
+    if (bookingError)
+      return res.status(500).json({ error: "Failed to save booking", details: bookingError });
 
-    // ---- Add reminder 15 minutes before meeting ----
-    const reminderTime = new Date(dateTime.getTime() - 15 * 60000);
+    // ---- Add reminder 15 minutes before ----
+    const reminderTime = new Date(dateTime.getTime() - 15 * 60000); // 15 min before
     await supabase.from("reminders").insert([
       {
         booking_id: bookingData[0].id,
@@ -227,7 +239,7 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // ---- Send booking emails ----
+    // ---- Send emails ----
     await sendBookingEmails({
       name,
       email,
@@ -243,7 +255,7 @@ export default async function handler(req, res) {
       supabaseBookingId: bookingData[0].id,
     });
   } catch (err) {
-    console.error(err);
+    console.error("Unexpected /api/book error:", err);
     return res.status(500).json({ error: "Server error", details: String(err) });
   }
 }
