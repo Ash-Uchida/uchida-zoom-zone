@@ -1,73 +1,61 @@
-// api/send-reminders.js
-import { createClient } from "@supabase/supabase-js";
-import nodemailer from "nodemailer";
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
-
-async function sendReminderEmail({ name, email, dateTime, zoomLink, duration }) {
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
-
-  const dateTimeStr = new Date(dateTime).toLocaleString();
-
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM,
-    to: email,
-    subject: `Reminder: Zoom Zone Meeting in 15 minutes`,
-    html: `<p>Hi ${name},</p>
-           <p>This is a reminder that your meeting starts at <strong>${dateTimeStr}</strong> and lasts <strong>${duration} minutes</strong>.</p>
-           <p>Join Zoom meeting: <a href="${zoomLink}">${zoomLink}</a></p>
-           <p>Thanks,<br/>Zoom Zone</p>`,
-  });
-}
+import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req, res) {
-  // Check cron secret
-  if (req.headers.get("Authorization") !== `Bearer ${process.env.CRON_SECRET}`) {
-    return new Response("Unauthorized", { status: 401 });
+  // 1. Verify CRON_SECRET to prevent public access
+  const auth = req.headers.authorization;
+  if (!auth || auth !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
-  try {
-    const now = new Date();
-    const reminderWindowStart = new Date(now.getTime() + 14 * 60 * 1000); // 14 minutes from now
-    const reminderWindowEnd = new Date(now.getTime() + 16 * 60 * 1000); // 16 minutes from now
+  // 2. Only allow POST
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
 
-    // Fetch bookings happening in ~15 minutes
-    const { data: bookings, error } = await supabase
-      .from("bookings")
-      .select("*")
-      .gte("time", reminderWindowStart.toISOString())
-      .lte("time", reminderWindowEnd.toISOString());
+  // 3. Connect to Supabase
+  const supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+  );
 
-    if (error) throw error;
+  // 4. Find bookings happening 15 minutes from now
+  const fifteenMinutesFromNow = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-    // Send reminders
-    for (const booking of bookings) {
-      await sendReminderEmail({
-        name: booking.name,
-        email: booking.email,
-        dateTime: booking.time,
-        zoomLink: booking.zoom_link,
-        duration: booking.duration,
-      });
-    }
+  const { data: bookings, error } = await supabase
+    .from("bookings")
+    .select("*")
+    .eq("start_time", fifteenMinutesFromNow);
 
-    return new Response(JSON.stringify({ message: "Reminders sent", count: bookings.length }), {
-      headers: { "Content-Type": "application/json" },
-    });
-  } catch (err) {
-    console.error("Error sending reminders:", err);
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
+  if (error) {
+    console.error("Database error:", error);
+    return res.status(500).json({ error: "Supabase error" });
+  }
+
+  if (!bookings || bookings.length === 0) {
+    return res.status(200).json({ message: "No reminders to send" });
+  }
+
+  // 5. Send emails using Resend
+  const resendKey = process.env.RESEND_API_KEY;
+
+  for (const booking of bookings) {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${resendKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: "Ash’s Zoom Zone <no-reply@yourdomain.com>",
+        to: booking.email,
+        subject: "Upcoming Zoom Meeting Reminder",
+        html: `
+          <p>Hi ${booking.name},</p>
+          <p>This is a reminder that your Zoom call is in <strong>15 minutes</strong>.</p>
+        `
+      })
     });
   }
+
+  return res.status(200).json({ sent: bookings.length });
 }
