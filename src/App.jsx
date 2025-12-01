@@ -19,6 +19,7 @@ export default function App() {
   const [status, setStatus] = useState(null);
   const [availableSlots, setAvailableSlots] = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
+  const [busyTimes, setBusyTimes] = useState([]); // ISO times that are already booked
 
   const handleSelectDate = (date) => {
     if (!date) return;
@@ -27,7 +28,6 @@ export default function App() {
     setTime("");
   };
 
-  // Generate timeslots from 6am to 10pm
   const generateTimeSlots = (durationMinutes = 15) => {
     const slots = [];
     const now = new Date();
@@ -39,7 +39,6 @@ export default function App() {
     let slotTime = new Date(start);
 
     while (slotTime <= end) {
-      // skip past times if today
       if (slotTime > now || slotTime.toDateString() !== now.toDateString()) {
         const hh = slotTime.getHours().toString().padStart(2, "0");
         const mm = slotTime.getMinutes().toString().padStart(2, "0");
@@ -55,23 +54,26 @@ export default function App() {
     if (!selectedDate) return;
     setLoadingSlots(true);
 
-    const fetchAvailableSlots = async () => {
+    const fetchSlots = async () => {
       try {
+        // Generate all time slots
         const slots = generateTimeSlots(duration);
 
-        // Fetch existing bookings for selected date
+        // Fetch busy times for selected date
         const dateFormatted = selectedDate.toISOString().split("T")[0];
         const res = await fetch(`/api/calendar/freebusy?date=${dateFormatted}`);
         const data = await res.json();
 
-        const busyTimes = (data.bookings || []).map(
-          (b) => new Date(b.time).toISOString()
-        );
+        const busy = (data.bookings || []).map((b) => new Date(b.time).toISOString());
+        setBusyTimes(busy);
 
-        // Filter out busy slots
-        const freeSlots = slots.filter((slot) => !busyTimes.includes(slot.iso));
+        // Keep all slots but mark busy ones
+        const slotsWithStatus = slots.map((s) => ({
+          ...s,
+          busy: busy.includes(s.iso),
+        }));
 
-        setAvailableSlots(freeSlots);
+        setAvailableSlots(slotsWithStatus);
       } catch (err) {
         console.error(err);
         setAvailableSlots([]);
@@ -80,7 +82,7 @@ export default function App() {
       }
     };
 
-    fetchAvailableSlots();
+    fetchSlots();
   }, [selectedDate, duration]);
 
   const handleSubmit = async (e) => {
@@ -142,8 +144,8 @@ export default function App() {
               <select value={time} onChange={(e) => setTime(e.target.value)} required>
                 <option value="">Select a time</option>
                 {availableSlots.map((s) => (
-                  <option key={s.iso} value={s.time}>
-                    {s.time}
+                  <option key={s.iso} value={s.time} disabled={s.busy}>
+                    {s.time} {s.busy ? "(Unavailable)" : ""}
                   </option>
                 ))}
               </select>

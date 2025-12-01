@@ -2,36 +2,11 @@ import React, { useEffect, useState } from "react";
 
 export default function BookingCalendar({ selectedDate, onSelectDate }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [busyDates, setBusyDates] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const fetchBusyDates = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/calendar/freebusy");
-        const data = await res.json();
-
-        const busy = [];
-        if (data.calendars && data.calendars.primary?.busy) {
-          data.calendars.primary.busy.forEach((slot) => {
-            const start = new Date(slot.start);
-            const hour = start.getHours();
-            if (hour >= 6 && hour <= 22) {
-              busy.push(start.toISOString().split("T")[0]);
-            }
-          });
-        }
-
-        setBusyDates(busy);
-      } catch (err) {
-        console.error("Failed to fetch busy dates:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchBusyDates();
+    // No need to fetch busy dates for UI; we are showing all days normally
+    // Busy times are now handled in App.jsx for the dropdown
   }, [currentMonth]);
 
   const endOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
@@ -70,7 +45,6 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
           const isoDate = date.toISOString().split("T")[0];
           const isSelected =
             selectedDate && isoDate === selectedDate.toISOString().split("T")[0];
-          const isBusy = busyDates.includes(isoDate);
 
           return (
             <div
@@ -79,7 +53,7 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
               onClick={() => handleSelectDate(date)}
               style={{
                 cursor: "pointer",
-                opacity: isBusy ? 0.5 : 1, // gray out busy days
+                opacity: 1, // all days look normal
               }}
             >
               {date.getDate()}
