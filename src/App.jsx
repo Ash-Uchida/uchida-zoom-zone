@@ -1,4 +1,3 @@
-// src/App.jsx
 import { useState, useEffect } from "react";
 import "./App.css";
 import BookingCalendar from "./BookingCalendar";
@@ -23,14 +22,14 @@ export default function App() {
   const [loadingSlots, setLoadingSlots] = useState(false);
 
   const handleSelectDate = (date) => {
-    if (!date) return;
+    if (!date || isNaN(date)) return;
     const isoDate = date.toISOString().split("T")[0];
     setSelectedDate(date);
     localStorage.setItem("selectedDate", isoDate);
-    setTime("");
+    setTime(""); // reset time when date changes
   };
 
-  // Fetch available timeslots
+  // Fetch available timeslots for selected date
   useEffect(() => {
     const fetchSlots = async () => {
       if (!selectedDate) {
@@ -45,9 +44,9 @@ export default function App() {
         const data = await res.json();
 
         if (data?.slots) {
-          // Filter to only show 6:00 → 22:00
+          // Filter slots from 6 AM to 10 PM
           const filtered = data.slots.filter(slot => {
-            const [hour] = slot.time.split(":").map(Number);
+            const hour = Number(slot.time.split(":")[0]);
             return hour >= 6 && hour <= 22;
           });
           setAvailableSlots(filtered);
@@ -67,23 +66,40 @@ export default function App() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedDate || !time || !name || !email) {
+
+    if (!(selectedDate instanceof Date) || isNaN(selectedDate)) {
+      setStatus("Please select a valid date.");
+      return;
+    }
+
+    if (!time || !/^\d{2}:\d{2}$/.test(time)) {
+      setStatus("Please select a valid time.");
+      return;
+    }
+
+    if (!name || !email) {
       setStatus("Please fill out all fields.");
       return;
     }
 
     const dateFormatted = selectedDate.toISOString().split("T")[0];
+    const payload = { name, email, date: dateFormatted, time, duration };
+    console.log("Booking payload:", payload);
 
     try {
       const res = await fetch("/api/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, date: dateFormatted, time, duration }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
-      if (data.error) setStatus("Error: " + data.error);
-      else setStatus(`Booking successful! Zoom Link: ${data.zoomLink}`);
+      if (!res.ok || data.error) {
+        console.error("Booking error:", data);
+        setStatus("Error: " + (data.error || "Unknown error"));
+      } else {
+        setStatus(`Booking successful! Zoom Link: ${data.zoomLink}`);
+      }
     } catch (err) {
       console.error(err);
       setStatus("Something went wrong.");
@@ -105,7 +121,7 @@ export default function App() {
 
       <BookingCalendar selectedDate={selectedDate} onSelectDate={handleSelectDate} />
 
-      {selectedDate instanceof Date && !isNaN(selectedDate) && (
+      {selectedDate && (
         <form onSubmit={handleSubmit} className="form-container">
           <h2>Selected: {selectedDate.toDateString()}</h2>
 
@@ -114,12 +130,15 @@ export default function App() {
             placeholder="Your name"
             value={name}
             onChange={(e) => setName(e.target.value)}
+            required
           />
+
           <input
             type="email"
             placeholder="Your email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            required
           />
 
           <label>
