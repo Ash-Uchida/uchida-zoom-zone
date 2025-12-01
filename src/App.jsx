@@ -1,4 +1,3 @@
-// src/App.jsx
 import { useState, useEffect } from "react";
 import "./App.css";
 import BookingCalendar from "./BookingCalendar";
@@ -19,7 +18,6 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState(null);
   const [availableSlots, setAvailableSlots] = useState([]);
-  const [busySlots, setBusySlots] = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
 
   const handleSelectDate = (date) => {
@@ -29,7 +27,7 @@ export default function App() {
     setTime("");
   };
 
-  // Generate all possible timeslots (6 AM - 10 PM) based on duration
+  // Generate timeslots from 6am to 10pm
   const generateTimeSlots = (durationMinutes = 15) => {
     const slots = [];
     const now = new Date();
@@ -39,7 +37,9 @@ export default function App() {
     end.setHours(22, 0, 0, 0); // 10:00 PM
 
     let slotTime = new Date(start);
+
     while (slotTime <= end) {
+      // skip past times if today
       if (slotTime > now || slotTime.toDateString() !== now.toDateString()) {
         const hh = slotTime.getHours().toString().padStart(2, "0");
         const mm = slotTime.getMinutes().toString().padStart(2, "0");
@@ -51,27 +51,32 @@ export default function App() {
     return slots;
   };
 
-  // Fetch busy times for the selected date
+  // Fetch busy times from Google Calendar
   useEffect(() => {
     if (!selectedDate) return;
+    setLoadingSlots(true);
 
     const fetchBusyTimes = async () => {
-      setLoadingSlots(true);
-      setTime("");
       try {
         const dateFormatted = selectedDate.toISOString().split("T")[0];
         const res = await fetch(`/api/calendar/busy?date=${dateFormatted}`);
         const data = await res.json();
-        const busy = data.busyTimes || [];
-        setBusySlots(busy);
 
-        // Generate all slots and mark which are busy
-        const allSlots = generateTimeSlots(duration);
-        setAvailableSlots(allSlots);
+        const slots = generateTimeSlots(duration);
+
+        const freeSlots = slots.map((slot) => {
+          const slotStart = new Date(`${dateFormatted}T${slot.time}:00`).getTime();
+          const isBusy = data.busyTimes.some((bt) => {
+            const btStart = new Date(bt.start).getTime();
+            const btEnd = new Date(bt.end).getTime();
+            return slotStart >= btStart && slotStart < btEnd;
+          });
+          return { ...slot, busy: isBusy };
+        });
+
+        setAvailableSlots(freeSlots);
       } catch (err) {
         console.error("Failed to fetch busy times:", err);
-        setAvailableSlots(generateTimeSlots(duration));
-        setBusySlots([]);
       } finally {
         setLoadingSlots(false);
       }
@@ -142,10 +147,10 @@ export default function App() {
                   <option
                     key={s.iso}
                     value={s.time}
-                    disabled={busySlots.includes(s.iso)}
-                    style={{ color: busySlots.includes(s.iso) ? "#999" : "#000" }}
+                    disabled={s.busy}
+                    style={{ color: s.busy ? "#aaa" : "#000" }}
                   >
-                    {s.time}{busySlots.includes(s.iso) ? " (Unavailable)" : ""}
+                    {s.time} {s.busy ? "(unavailable)" : ""}
                   </option>
                 ))}
               </select>
@@ -155,13 +160,17 @@ export default function App() {
           <label>
             Duration (minutes):
             <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-              {[15, 30, 45, 60].map(d => (
-                <option key={d} value={d}>{d}</option>
+              {[15, 30, 45, 60].map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
               ))}
             </select>
           </label>
 
-          <button type="submit" className="submit-btn">Book Meeting</button>
+          <button type="submit" className="submit-btn">
+            Book Meeting
+          </button>
         </form>
       )}
 

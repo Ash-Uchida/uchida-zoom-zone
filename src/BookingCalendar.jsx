@@ -1,9 +1,7 @@
-// src/BookingCalendar.jsx
 import React, { useEffect, useState } from "react";
 
 export default function BookingCalendar({ selectedDate, onSelectDate }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [loading, setLoading] = useState(false);
 
   const endOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
   const daysInMonth = Array.from({ length: endOfMonth.getDate() }, (_, i) =>
@@ -28,8 +26,6 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
         <button onClick={handleNextMonth}>▶</button>
       </div>
 
-      {loading && <p>Loading availability...</p>}
-
       <div className="calendar-grid">
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
           <div key={d} className="calendar-day-label">
@@ -46,10 +42,7 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
               key={isoDate}
               className={`calendar-day ${isSelected ? "selected" : ""}`}
               onClick={() => handleSelectDate(date)}
-              style={{
-                cursor: "pointer",
-                opacity: 1, // All days look the same; no fading for busy days
-              }}
+              style={{ cursor: "pointer" }}
             >
               {date.getDate()}
             </div>

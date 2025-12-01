@@ -1,4 +1,3 @@
-// /api/calendar/busy.js
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -7,35 +6,34 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+
+  const { date } = req.query;
+  if (!date) return res.status(400).json({ error: "Missing date parameter" });
 
   try {
-    const { date } = req.query;
-    if (!date) {
-      return res.status(400).json({ error: "Missing date query parameter" });
-    }
+    const { data: tokens } = await supabase.from("integrations").select("*").eq("id", "google").single();
+    if (!tokens?.access_token) return res.status(500).json({ error: "No Google token found" });
 
-    // Construct start and end timestamps for that day
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
+    const startOfDay = new Date(`${date}T00:00:00Z`).toISOString();
+    const endOfDay = new Date(`${date}T23:59:59Z`).toISOString();
 
-    const { data, error } = await supabase
-      .from("bookings")
-      .select("time")
-      .gte("time", startOfDay.toISOString())
-      .lte("time", endOfDay.toISOString());
+    const calendarRes = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${startOfDay}&timeMax=${endOfDay}&singleEvents=true&orderBy=startTime`,
+      {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      }
+    );
 
-    if (error) throw error;
+    const data = await calendarRes.json();
+    const busyTimes = data.items?.map((event) => ({
+      start: event.start.dateTime || event.start.date,
+      end: event.end.dateTime || event.end.date,
+    })) || [];
 
-    const busyTimes = data.map((booking) => booking.time);
-
-    return res.status(200).json({ busyTimes });
+    res.status(200).json({ busyTimes });
   } catch (err) {
     console.error("Error fetching busy times:", err);
-    return res.status(500).json({ error: "Server error", details: String(err) });
+    res.status(500).json({ error: "Server error", details: String(err) });
   }
 }
