@@ -1,0 +1,16 @@
+name: Send Reminders
+
+on:
+  schedule:
+    - cron: "* * * * *"  # runs every minutes; adjust later if needed
+  workflow_dispatch:       # allows manual triggering
+
+jobs:
+  send_reminders:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Hit send-reminders endpoint
+        run: |
+          curl -X POST https://uchida-zoom-zone.vercel.app/api/send-reminders \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
