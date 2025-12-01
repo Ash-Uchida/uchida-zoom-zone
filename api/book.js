@@ -41,20 +41,157 @@ async function sendBookingEmails({ name, email, dateTime, zoomLink, duration }) 
   });
 }
 
+// ---- Google token refresh ----
+async function refreshGoogleToken(refreshToken) {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+
+  const data = await res.json();
+  if (data.error) throw new Error("Google token refresh failed: " + JSON.stringify(data));
+
+  // Update Supabase
+  await supabase.from("integrations").upsert({
+    id: "google",
+    access_token: data.access_token,
+    refresh_token: refreshToken,
+    updated_at: new Date().toISOString(),
+  });
+
+  return data.access_token;
+}
+
+// ---- Zoom token refresh ----
+async function refreshZoomToken(refreshToken) {
+  const tokenRes = await fetch(
+    `https://zoom.us/oauth/token?grant_type=refresh_token&refresh_token=${refreshToken}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization:
+          "Basic " +
+          Buffer.from(`${process.env.ZOOM_CLIENT_ID}:${process.env.ZOOM_CLIENT_SECRET}`).toString(
+            "base64"
+          ),
+      },
+    }
+  );
+
+  const tokenData = await tokenRes.json();
+  if (tokenData.error) throw new Error("Zoom token refresh failed: " + JSON.stringify(tokenData));
+
+  // Update Supabase
+  await supabase.from("integrations").upsert({
+    id: "zoom",
+    access_token: tokenData.access_token,
+    refresh_token: tokenData.refresh_token,
+    updated_at: new Date().toISOString(),
+  });
+
+  return tokenData.access_token;
+}
+
+// ---- Main handler ----
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
     const { name, email, date, time, duration = 15 } = req.body;
 
-    if (!name || !email || !date || !time)
+    if (!name || !email || !date || !time) {
       return res.status(400).json({ error: "Missing required fields" });
+    }
 
-    // Validate date/time
-    const dateTime = new Date(`${date}T${time}`);
-    if (isNaN(dateTime)) return res.status(400).json({ error: "Invalid date or time" });
+    // Validate date & time
+    const dateTimeObj = new Date(`${date}T${time}:00`);
+    if (isNaN(dateTimeObj.getTime())) {
+      return res.status(400).json({ error: "Invalid date or time" });
+    }
 
-    const endTime = new Date(dateTime.getTime() + Number(duration) * 60000);
+    const dateTime = dateTimeObj.toISOString();
+    const endTime = new Date(dateTimeObj.getTime() + Number(duration) * 60000).toISOString();
+
+    // Fetch tokens
+    const { data: tokensData, error: tokensError } = await supabase.from("integrations").select("*");
+    if (tokensError) throw new Error("Failed to fetch integrations: " + JSON.stringify(tokensError));
+
+    const zoom = tokensData.find((t) => t.id === "zoom");
+    const google = tokensData.find((t) => t.id === "google");
+    if (!zoom || !google) return res.status(500).json({ error: "Missing Zoom or Google tokens" });
+
+    // Create Zoom meeting
+    let zoomAccessToken = zoom.access_token;
+    const createZoomMeeting = async (token) => {
+      const zoomRes = await fetch("https://api.zoom.us/v2/users/me/meetings", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          topic: `Meeting with ${name}`,
+          type: 2,
+          start_time: dateTime,
+          duration: Number(duration),
+        }),
+      });
+      return await zoomRes.json();
+    };
+
+    let zoomData = await createZoomMeeting(zoomAccessToken);
+    if ((!zoomData.join_url && zoomData.code) || (zoomData.code === 124 || zoomData.code === 1241)) {
+      zoomAccessToken = await refreshZoomToken(zoom.refresh_token);
+      zoomData = await createZoomMeeting(zoomAccessToken);
+    }
+
+    if (!zoomData.join_url) {
+      return res.status(500).json({ error: "Zoom meeting creation failed", details: zoomData });
+    }
+
+    // Create Google Calendar event
+    let googleAccessToken = google.access_token;
+    let googleRes = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${googleAccessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        summary: `Zoom Meeting with ${name}`,
+        start: { dateTime },
+        end: { dateTime: endTime },
+        attendees: [{ email }],
+        description: `Join Zoom: ${zoomData.join_url}`,
+      }),
+    });
+
+    if (!googleRes.ok) {
+      googleAccessToken = await refreshGoogleToken(google.refresh_token);
+      googleRes = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${googleAccessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          summary: `Zoom Meeting with ${name}`,
+          start: { dateTime },
+          end: { dateTime: endTime },
+          attendees: [{ email }],
+          description: `Join Zoom: ${zoomData.join_url}`,
+        }),
+      });
+    }
+
+    const googleData = await googleRes.json();
+    if (!googleData.id) return res.status(500).json({ error: "Google Calendar event failed", details: googleData });
 
     // Save booking to Supabase
     const { data: bookingData, error: bookingError } = await supabase
@@ -63,32 +200,35 @@ export default async function handler(req, res) {
         {
           name,
           email,
-          time: dateTime.toISOString(),
-          end_time: endTime.toISOString(),
+          time: dateTime,
+          end_time: endTime,
           duration: Number(duration),
+          zoom_link: zoomData.join_url,
           created_at: new Date().toISOString(),
         },
       ])
-      .select(); // return inserted row
+      .select();
 
-    if (bookingError)
-      return res.status(500).json({ error: "Failed to save booking", details: bookingError });
+    if (bookingError) return res.status(500).json({ error: "Failed to save booking", details: bookingError });
 
     // Send emails
     await sendBookingEmails({
       name,
       email,
       dateTime,
-      zoomLink: `https://zoom.us/j/${Math.floor(Math.random() * 1000000000)}`, // placeholder
+      zoomLink: zoomData.join_url,
       duration: Number(duration),
     });
 
+    // Respond
     return res.status(200).json({
       message: "Booking successful!",
+      zoomLink: zoomData.join_url,
+      googleEventId: googleData.id,
       supabaseBookingId: bookingData[0].id,
     });
   } catch (err) {
-    console.error("Booking error:", err);
+    console.error("Unexpected /api/book error:", err);
     return res.status(500).json({ error: "Server error", details: String(err) });
   }
 }
