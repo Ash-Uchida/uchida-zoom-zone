@@ -15,16 +15,16 @@ export default async function handler(req, res) {
   // 3. Connect to Supabase
   const supabase = createClient(
     process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
+    process.env.SUPABASE_SERVICE_KEY // make sure this matches your Vercel env variable
   );
 
   // 4. Calculate 15 minutes from now
   const now = new Date();
-  const fifteenFromNow = new Date(now.getTime() + 15 * 60 * 1000);
+  const fifteenMinutesFromNow = new Date(now.getTime() + 15 * 60 * 1000);
 
-  // Optional ±30 seconds window to avoid missing exact matches
-  const windowStart = new Date(fifteenFromNow.getTime() - 30000).toISOString();
-  const windowEnd = new Date(fifteenFromNow.getTime() + 30000).toISOString();
+  // Optional ±30 seconds window
+  const windowStart = new Date(fifteenMinutesFromNow.getTime() - 30000).toISOString();
+  const windowEnd = new Date(fifteenMinutesFromNow.getTime() + 30000).toISOString();
 
   // 5. Query bookings happening 15 minutes from now
   const { data: bookings, error } = await supabase
@@ -37,6 +37,8 @@ export default async function handler(req, res) {
     console.error("Database error:", error);
     return res.status(500).json({ error: "Supabase error" });
   }
+
+  console.log("Bookings found:", bookings?.length || 0);
 
   if (!bookings || bookings.length === 0) {
     return res.status(200).json({ message: "No reminders to send" });
@@ -64,6 +66,7 @@ export default async function handler(req, res) {
           `
         })
       });
+      console.log(`Reminder sent for booking ${booking.id} to ${booking.email}`);
     } catch (err) {
       console.error("Error sending email for booking:", booking.id, err);
     }
