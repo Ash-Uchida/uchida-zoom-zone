@@ -1,3 +1,4 @@
+// src/BookingCalendar.jsx
 import React, { useEffect, useState } from "react";
 
 export default function BookingCalendar({ selectedDate, onSelectDate }) {
@@ -41,7 +42,6 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
     setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
 
   const handleSelectDate = (date) => {
-    if (!date) return;
     onSelectDate(date);
   };
 
@@ -70,7 +70,7 @@ export default function BookingCalendar({ selectedDate, onSelectDate }) {
               key={isoDate}
               className={`calendar-day ${isSelected ? "selected" : ""} ${isBusy ? "busy" : ""}`}
               onClick={() => handleSelectDate(date)}
-              style={{ cursor: "pointer", opacity: isBusy ? 0.9 : 1 }}
+              style={{ cursor: "pointer", opacity: isBusy ? 0.7 : 1 }}
             >
               {date.getDate()}
               {isBusy && <div style={{ fontSize: 10, marginTop: 6 }}>busy</div>}
