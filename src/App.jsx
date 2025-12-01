@@ -1,4 +1,3 @@
-// src/App.jsx
 import { useState, useEffect } from "react";
 import "./App.css";
 import BookingCalendar from "./BookingCalendar";
@@ -28,45 +27,53 @@ export default function App() {
     setTime("");
   };
 
-  // Generate all slots from 6am to 10pm for given duration
+  // Generate timeslots from 6am to 10pm
   const generateTimeSlots = (durationMinutes = 15) => {
-    if (!selectedDate) return [];
     const slots = [];
+    const now = new Date();
     const start = new Date(selectedDate);
     start.setHours(6, 0, 0, 0); // 6:00 AM
     const end = new Date(selectedDate);
     end.setHours(22, 0, 0, 0); // 10:00 PM
+
     let slotTime = new Date(start);
+
     while (slotTime <= end) {
-      const hh = slotTime.getHours().toString().padStart(2, "0");
-      const mm = slotTime.getMinutes().toString().padStart(2, "0");
-      slots.push({ time: `${hh}:${mm}`, iso: slotTime.toISOString() });
+      // skip past times if today
+      if (slotTime > now || slotTime.toDateString() !== now.toDateString()) {
+        const hh = slotTime.getHours().toString().padStart(2, "0");
+        const mm = slotTime.getMinutes().toString().padStart(2, "0");
+        slots.push({ time: `${hh}:${mm}`, iso: slotTime.toISOString() });
+      }
       slotTime = new Date(slotTime.getTime() + durationMinutes * 60000);
     }
+
     return slots;
   };
 
-  // Fetch booked times and filter slots
   useEffect(() => {
     if (!selectedDate) return;
     setLoadingSlots(true);
 
     const fetchAvailableSlots = async () => {
       try {
-        const allSlots = generateTimeSlots(duration);
-        const dateFormatted = selectedDate.toISOString().split("T")[0];
+        const slots = generateTimeSlots(duration);
 
-        // Fetch existing bookings
+        // Fetch existing bookings for selected date
+        const dateFormatted = selectedDate.toISOString().split("T")[0];
         const res = await fetch(`/api/calendar/freebusy?date=${dateFormatted}`);
         const data = await res.json();
-        const bookedTimes = (data.bookings || []).map(b => new Date(b.time).toISOString());
 
-        // Filter out booked slots
-        const freeSlots = allSlots.filter(slot => !bookedTimes.includes(slot.iso));
+        const busyTimes = (data.bookings || []).map(
+          (b) => new Date(b.time).toISOString()
+        );
+
+        // Filter out busy slots
+        const freeSlots = slots.filter((slot) => !busyTimes.includes(slot.iso));
 
         setAvailableSlots(freeSlots);
       } catch (err) {
-        console.error("Error fetching bookings:", err);
+        console.error(err);
         setAvailableSlots([]);
       } finally {
         setLoadingSlots(false);
@@ -94,7 +101,7 @@ export default function App() {
 
       const data = await res.json();
       if (res.status !== 200) setStatus("Error: " + data.error);
-      else setStatus(`Booking successful! Zoom Link: ${data.zoomLink}`);
+      else setStatus(`Booking successful! ID: ${data.supabaseBookingId}`);
     } catch (err) {
       console.error(err);
       setStatus("Something went wrong.");
@@ -146,13 +153,17 @@ export default function App() {
           <label>
             Duration (minutes):
             <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-              {[15, 30, 45, 60].map(d => (
-                <option key={d} value={d}>{d}</option>
+              {[15, 30, 45, 60].map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
               ))}
             </select>
           </label>
 
-          <button type="submit" className="submit-btn">Book Meeting</button>
+          <button type="submit" className="submit-btn">
+            Book Meeting
+          </button>
         </form>
       )}
 
