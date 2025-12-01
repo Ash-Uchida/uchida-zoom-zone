@@ -1,4 +1,7 @@
 {
+    "builds": [
+      { "src": "api/**/*.js", "use": "@vercel/node" }
+    ],
     "crons": [
       {
         "path": "/api/send-reminders",
