@@ -28,45 +28,52 @@ export default function App() {
     setTime("");
   };
 
-  // Generate timeslots from 6am to 10pm
+  // Generate all slots from 6am to 10pm for given duration
   const generateTimeSlots = (durationMinutes = 15) => {
+    if (!selectedDate) return [];
     const slots = [];
-    const now = new Date();
     const start = new Date(selectedDate);
     start.setHours(6, 0, 0, 0); // 6:00 AM
     const end = new Date(selectedDate);
     end.setHours(22, 0, 0, 0); // 10:00 PM
-
     let slotTime = new Date(start);
-
     while (slotTime <= end) {
-      // skip past times if today
-      if (
-        slotTime > now ||
-        slotTime.toDateString() !== now.toDateString()
-      ) {
-        const hh = slotTime.getHours().toString().padStart(2, "0");
-        const mm = slotTime.getMinutes().toString().padStart(2, "0");
-        slots.push({ time: `${hh}:${mm}`, iso: slotTime.toISOString() });
-      }
+      const hh = slotTime.getHours().toString().padStart(2, "0");
+      const mm = slotTime.getMinutes().toString().padStart(2, "0");
+      slots.push({ time: `${hh}:${mm}`, iso: slotTime.toISOString() });
       slotTime = new Date(slotTime.getTime() + durationMinutes * 60000);
     }
-
     return slots;
   };
 
+  // Fetch booked times and filter slots
   useEffect(() => {
     if (!selectedDate) return;
     setLoadingSlots(true);
 
-    // simulate fetching available slots
-    const slots = generateTimeSlots(duration);
+    const fetchAvailableSlots = async () => {
+      try {
+        const allSlots = generateTimeSlots(duration);
+        const dateFormatted = selectedDate.toISOString().split("T")[0];
 
-    // Remove busy slots (assuming your BookingCalendar or API provides `busy` flags)
-    const freeSlots = slots.filter((s) => !s.busy);
+        // Fetch existing bookings
+        const res = await fetch(`/api/calendar/freebusy?date=${dateFormatted}`);
+        const data = await res.json();
+        const bookedTimes = (data.bookings || []).map(b => new Date(b.time).toISOString());
 
-    setAvailableSlots(freeSlots);
-    setLoadingSlots(false);
+        // Filter out booked slots
+        const freeSlots = allSlots.filter(slot => !bookedTimes.includes(slot.iso));
+
+        setAvailableSlots(freeSlots);
+      } catch (err) {
+        console.error("Error fetching bookings:", err);
+        setAvailableSlots([]);
+      } finally {
+        setLoadingSlots(false);
+      }
+    };
+
+    fetchAvailableSlots();
   }, [selectedDate, duration]);
 
   const handleSubmit = async (e) => {
@@ -87,7 +94,7 @@ export default function App() {
 
       const data = await res.json();
       if (res.status !== 200) setStatus("Error: " + data.error);
-      else setStatus(`Booking successful! ID: ${data.supabaseBookingId}`);
+      else setStatus(`Booking successful! Zoom Link: ${data.zoomLink}`);
     } catch (err) {
       console.error(err);
       setStatus("Something went wrong.");
