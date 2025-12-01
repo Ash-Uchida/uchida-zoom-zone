@@ -225,6 +225,24 @@ export default async function handler(req, res) {
     if (bookingError)
       return res.status(500).json({ error: "Failed to save booking", details: bookingError });
 
+    const bookingId = bookingData[0].id;
+
+    // ---- Insert reminder 15 minutes before meeting ----
+    const reminderTime = new Date(dateTime.getTime() - 15 * 60000); // 15 minutes before
+    const { error: reminderError } = await supabase.from("reminders").insert([
+      {
+        booking_id: bookingId,
+        name,
+        email,
+        zoom_link: zoomData.join_url,
+        duration: Number(duration),
+        reminder_time: reminderTime,
+        sent: false,
+      },
+    ]);
+
+    if (reminderError) console.error("Failed to insert reminder:", reminderError);
+
     // ---- Send emails ----
     await sendBookingEmails({
       name,
@@ -238,7 +256,7 @@ export default async function handler(req, res) {
       message: "Booking successful!",
       zoomLink: zoomData.join_url,
       googleEventId: googleData.id,
-      supabaseBookingId: bookingData[0].id,
+      supabaseBookingId: bookingId,
     });
   } catch (err) {
     console.error("Unexpected /api/book error:", err);
