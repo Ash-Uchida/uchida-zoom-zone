@@ -139,7 +139,7 @@ export default function App() {
           />
 
           <label>
-            Meeting Time:
+            Meeting Time (MST):
             {loadingSlots ? (
               <div>Loading times...</div>
             ) : availableSlots.length === 0 ? (
