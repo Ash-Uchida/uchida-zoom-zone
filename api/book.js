@@ -7,6 +7,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
+const LOCAL_TZ = "America/Boise";
+
 // ---- Email helper ----
 async function sendBookingEmails({ name, email, dateTime, zoomLink, duration }) {
   const transporter = nodemailer.createTransport({
@@ -17,7 +19,15 @@ async function sendBookingEmails({ name, email, dateTime, zoomLink, duration }) 
     },
   });
 
-  const dateTimeStr = new Date(dateTime).toLocaleString();
+  const dateTimeStr = new Date(dateTime).toLocaleString("en-US", {
+    timeZone: LOCAL_TZ,
+    hour12: true,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
   // Email to participant
   await transporter.sendMail({
@@ -25,7 +35,7 @@ async function sendBookingEmails({ name, email, dateTime, zoomLink, duration }) 
     to: email,
     subject: `Your Zoom Zone Meeting - ${dateTimeStr}`,
     html: `<p>Hi ${name},</p>
-           <p>Your meeting is scheduled for <strong>${dateTimeStr}</strong> and will last <strong>${duration} minutes</strong>.</p>
+           <p>Your meeting is scheduled for <strong>${dateTimeStr} MST</strong> and will last <strong>${duration} minutes</strong>.</p>
            <p>Join Zoom meeting: <a href="${zoomLink}">${zoomLink}</a></p>
            <p>Thanks,<br/>Zoom Zone</p>`,
   });
@@ -36,7 +46,7 @@ async function sendBookingEmails({ name, email, dateTime, zoomLink, duration }) 
     to: process.env.EMAIL_FROM,
     subject: `New Booking - ${dateTimeStr}`,
     html: `<p>New meeting booked by <strong>${name}</strong> (${email})</p>
-           <p>Scheduled for <strong>${dateTimeStr}</strong> for <strong>${duration} minutes</strong>.</p>
+           <p>Scheduled for <strong>${dateTimeStr} MST</strong> for <strong>${duration} minutes</strong>.</p>
            <p>Zoom link: <a href="${zoomLink}">${zoomLink}</a></p>`,
   });
 }
@@ -96,14 +106,7 @@ async function refreshZoomToken(refreshToken) {
   return tokenData.access_token;
 }
 
-// ---- Helper to convert Date to local ISO without Z ----
-function toLocalISOString(date) {
-  const tzOffset = date.getTimezoneOffset() * 60000; // in ms
-  const localISO = new Date(date.getTime() - tzOffset).toISOString().slice(0, 19);
-  return localISO;
-}
-
-// ---- Check for double booking in Google Calendar ----
+// ---- Check for Google Calendar conflicts ----
 async function isSlotBusy(googleAccessToken, dateTime, endTime) {
   const startISO = dateTime.toISOString();
   const endISO = endTime.toISOString();
@@ -138,16 +141,14 @@ export default async function handler(req, res) {
     const google = tokensData.find((t) => t.id === "google");
     if (!zoom || !google) return res.status(500).json({ error: "Missing Zoom or Google tokens" });
 
-    // ---- Check Google Calendar for conflicts ----
+    // ---- Check Google Calendar conflicts ----
     let googleAccessToken = google.access_token;
     let busy = await isSlotBusy(googleAccessToken, dateTime, endTime);
     if (busy) {
       googleAccessToken = await refreshGoogleToken(google.refresh_token);
       busy = await isSlotBusy(googleAccessToken, dateTime, endTime);
     }
-    if (busy) {
-      return res.status(409).json({ error: "Time slot is already booked in Google Calendar" });
-    }
+    if (busy) return res.status(409).json({ error: "Time slot is already booked in Google Calendar" });
 
     // ---- Create Zoom meeting ----
     let zoomAccessToken = zoom.access_token;
@@ -174,33 +175,23 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Zoom meeting creation failed", details: zoomData });
 
     // ---- Create Google Calendar event ----
-    const timezone = "America/Denver"; // replace with your local timezone
-    let googleRes = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${googleAccessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        summary: `Zoom Meeting with ${name}`,
-        start: { dateTime: toLocalISOString(dateTime), timeZone: timezone },
-        end: { dateTime: toLocalISOString(endTime), timeZone: timezone },
-        attendees: [{ email }],
-        description: `Join Zoom: ${zoomData.join_url}`,
-      }),
-    });
-
-    if (!googleRes.ok) {
-      googleAccessToken = await refreshGoogleToken(google.refresh_token);
-      googleRes = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+    let googleRes = await fetch(
+      "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+      {
         method: "POST",
-        headers: { Authorization: `Bearer ${googleAccessToken}`, "Content-Type": "application/json" },
+        headers: {
+          Authorization: `Bearer ${googleAccessToken}`,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           summary: `Zoom Meeting with ${name}`,
-          start: { dateTime: toLocalISOString(dateTime), timeZone: timezone },
-          end: { dateTime: toLocalISOString(endTime), timeZone: timezone },
+          start: { dateTime: dateTime.toISOString(), timeZone: LOCAL_TZ },
+          end: { dateTime: endTime.toISOString(), timeZone: LOCAL_TZ },
           attendees: [{ email }],
           description: `Join Zoom: ${zoomData.join_url}`,
         }),
-      });
-    }
+      }
+    );
 
     const googleData = await googleRes.json();
     if (!googleData.id)
