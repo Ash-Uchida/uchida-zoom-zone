@@ -74,17 +74,20 @@ export default function App() {
     let intervalId;
 
     const updateSlots = async () => {
-      const busyTimes = await fetchBusyTimesWithRetry(1); // Retry once
+      const busyTimes = await fetchBusyTimesWithRetry(1);
 
       const slots = generateTimeSlots(duration);
 
       const freeSlots = slots.map((slot) => {
         const slotStart = new Date(`${selectedDate.toISOString().split("T")[0]}T${slot.time}:00`).getTime();
+        const slotEnd = slotStart + duration * 60000;
+
         const isBusy = busyTimes.some((bt) => {
           const btStart = new Date(bt.start).getTime();
           const btEnd = new Date(bt.end).getTime();
-          return slotStart >= btStart && slotStart < btEnd;
+          return slotStart < btEnd && slotEnd > btStart; // any overlap
         });
+
         return { ...slot, busy: isBusy };
       });
 
@@ -92,11 +95,9 @@ export default function App() {
       setLoadingSlots(false);
     };
 
-    // Initial fetch
     updateSlots();
 
-    // Poll every 10 seconds
-    intervalId = setInterval(updateSlots, 10000);
+    intervalId = setInterval(updateSlots, 10000); // poll every 10 sec
 
     return () => clearInterval(intervalId);
   }, [selectedDate, duration]);

@@ -3,7 +3,7 @@ import { google } from 'googleapis';
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY; // backend env var
+const supabaseKey = process.env.SUPABASE_ANON_KEY; // frontend-safe anon key
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 export default async function handler(req, res) {
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
     const { data, error } = await supabase
       .from('integrations')
       .select('*')
-      .eq('name', 'google')
+      .eq('id', 'google')
       .single();
 
     if (error || !data) throw new Error(error?.message || 'No Google integration found');
@@ -54,7 +54,8 @@ export default async function handler(req, res) {
       end: event.end.dateTime || event.end.date,
     }));
 
-    return res.status(200).json(busyTimes);
+    // Return as an object so frontend can do `data.busyTimes`
+    return res.status(200).json({ busyTimes });
 
   } catch (err) {
     console.error('Error fetching busy times:', err);
