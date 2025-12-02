@@ -1,15 +1,39 @@
-name: Send Reminders
+name: Send Calendar Reminders
 
+# Runs every minute (you can adjust the cron as needed)
 on:
   schedule:
-    - cron: "* * * * *"  # runs every minute
-  workflow_dispatch:       # allows manual triggering
+    - cron: "* * * * *"
+  workflow_dispatch:
 
 jobs:
   send_reminders:
     runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      ZOOM_CLIENT_ID: ${{ secrets.ZOOM_CLIENT_ID }}
+      ZOOM_CLIENT_SECRET: ${{ secrets.ZOOM_CLIENT_SECRET }}
+      ZOOM_REDIRECT_URI: ${{ secrets.ZOOM_REDIRECT_URI }}
+      GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
+      EMAIL_USER: ${{ secrets.EMAIL_USER }}
+      EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
 
     steps:
-      - name: Hit send-reminders endpoint securely
-        run: |
-          curl -X GET "https://uchida-zoom-zone.vercel.app/api/send-reminders?secret=${{ secrets.CRON_SECRET }}"
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Send reminders
+        run: node api/send-reminders.js

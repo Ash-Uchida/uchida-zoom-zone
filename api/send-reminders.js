@@ -3,29 +3,38 @@ import { google } from "googleapis";
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
 
 // ---- Email helper ----
 async function sendReminderEmail({ name, email, time, zoomLink }) {
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
+  try {
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
 
-  const timeStr = new Date(time).toLocaleString();
+    const timeStr = new Date(time).toLocaleString();
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM,
-    to: email,
-    subject: `Reminder: Your Zoom Meeting in 15 minutes`,
-    html: `<p>Hi ${name},</p>
-           <p>This is a friendly reminder that your meeting is starting at <strong>${timeStr}</strong>.</p>
-           <p>Join Zoom meeting: <a href="${zoomLink}">${zoomLink}</a></p>
-           <p>Thanks,<br/>Zoom Zone</p>`,
-  });
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM,
+      to: email,
+      subject: `Reminder: Your Zoom Meeting in 15 minutes`,
+      html: `<p>Hi ${name},</p>
+             <p>This is a friendly reminder that your meeting is starting at <strong>${timeStr}</strong>.</p>
+             <p>Join Zoom meeting: <a href="${zoomLink}">${zoomLink}</a></p>
+             <p>Thanks,<br/>Zoom Zone</p>`,
+    });
+
+    console.log(`✅ Reminder sent to ${email} for meeting at ${timeStr}`);
+  } catch (err) {
+    console.error(`❌ Failed to send reminder to ${email}:`, err.message);
+  }
 }
 
 // ---- Fetch Google Calendar events ----
@@ -33,7 +42,7 @@ async function getUpcomingEvents(oAuth2Client) {
   const calendar = google.calendar({ version: "v3", auth: oAuth2Client });
 
   const now = new Date();
-  const inOneHour = new Date(now.getTime() + 60 * 60 * 1000); // optional: fetch next 1 hour of events
+  const inOneHour = new Date(now.getTime() + 60 * 60 * 1000);
 
   const res = await calendar.events.list({
     calendarId: "primary",
@@ -48,7 +57,8 @@ async function getUpcomingEvents(oAuth2Client) {
 
 // ---- API handler ----
 export default async function handler(req, res) {
-  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
 
   try {
     // Fetch Google integration tokens
@@ -72,25 +82,41 @@ export default async function handler(req, res) {
     // Fetch upcoming Google events
     const events = await getUpcomingEvents(oAuth2Client);
 
+    console.log(`Found ${events.length} upcoming event(s)`);
+
     const now = new Date();
 
     for (const event of events) {
       const eventStart = new Date(event.start.dateTime || event.start.date);
       const minutesUntilStart = (eventStart - now) / 60000;
 
-      if (minutesUntilStart <= 15 && minutesUntilStart >= 0) {
-        // Match event to Supabase booking
-        const { data: bookingData, error: bookingError } = await supabase
+      console.log(
+        `Event: "${event.summary}" starts in ${minutesUntilStart.toFixed(
+          1
+        )} minutes`
+      );
+
+      // Send reminders for events starting in the next 15 minutes (allowing 1 min buffer)
+      if (minutesUntilStart <= 15 && minutesUntilStart >= -1) {
+        const zoomLink = event.description?.match(/https:\/\/[\w.-]+/)?.[0];
+
+        if (!zoomLink) {
+          console.log(`⚠️ No Zoom link found for event: "${event.summary}"`);
+          continue;
+        }
+
+        const { data: bookingData } = await supabase
           .from("bookings")
           .select("*")
-          .eq("zoom_link", event.description?.match(/https:\/\/[\w.-]+/)?.[0] || "")
+          .eq("zoom_link", zoomLink)
           .eq("reminder_sent", false)
-          .limit(1)
-          .single();
+          .maybeSingle();
 
-        if (bookingError || !bookingData) continue;
+        if (!bookingData) {
+          console.log(`⚠️ No booking found for Zoom link: ${zoomLink}`);
+          continue;
+        }
 
-        // Send email
         await sendReminderEmail({
           name: bookingData.name,
           email: bookingData.email,
@@ -103,6 +129,8 @@ export default async function handler(req, res) {
           .from("bookings")
           .update({ reminder_sent: true })
           .eq("id", bookingData.id);
+
+        console.log(`✅ Reminder marked as sent for booking ID ${bookingData.id}`);
       }
     }
 
