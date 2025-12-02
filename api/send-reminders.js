@@ -1,3 +1,4 @@
+// /api/send-reminders.js
 import { google } from "googleapis";
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
@@ -71,23 +72,11 @@ export default async function handler(req, res) {
     const now = new Date();
     const fifteenMinutesFromNow = new Date(now.getTime() + 15 * 60000);
 
-    // 2. Filter bookings starting within the next 15 minutes
+    // 2. Filter bookings starting within the next 15 minutes and not yet reminded
     const upcoming = bookings.filter((b) => {
       const start = new Date(b.start_time + " GMT-0700");
       return start > now && start <= fifteenMinutesFromNow && !b.reminder_sent;
     });
-
-    // ---- QUICK TEST MODE ----
-    // Add this temporary test booking to trigger an immediate reminder
-    const testBooking = {
-      id: "test123",
-      name: "Ash Uchida",
-      email: "ash.uchida0w0@gmail.com",
-      start_time: now.toISOString(),
-      zoom_link: "https://zoom.us/test",
-      reminder_sent: false,
-    };
-    upcoming.push(testBooking);
 
     console.log(`⏰ Bookings needing reminders: ${upcoming.length}`);
 
@@ -106,10 +95,8 @@ export default async function handler(req, res) {
           zoomLink: booking.zoom_link,
         });
 
-        // Only mark real bookings in Supabase
-        if (booking.id !== "test123") {
-          await supabase.from("bookings").update({ reminder_sent: true }).eq("id", booking.id);
-        }
+        // Mark reminder as sent in Supabase
+        await supabase.from("bookings").update({ reminder_sent: true }).eq("id", booking.id);
 
         sent.push(booking.id);
       } catch (err) {
