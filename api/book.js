@@ -7,17 +7,19 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
+const TIME_ZONE = process.env.TIME_ZONE || "America/Denver"; // set your local time zone
+
 // ---- Email helper ----
 async function sendBookingEmails({ name, email, dateTime, zoomLink, duration }) {
+  const dateTimeStr = new Date(dateTime).toLocaleString("en-US", {
+    timeZone: TIME_ZONE,
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+
   const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-  });
-
-  const dateTimeStr = new Date(dateTime).toLocaleString("en-US", {
-    timeZone: "America/Denver",
-    dateStyle: "short",
-    timeStyle: "short",
   });
 
   // Email to participant
@@ -43,7 +45,7 @@ async function sendBookingEmails({ name, email, dateTime, zoomLink, duration }) 
   });
 }
 
-// ---- Convert Date to local ISO without Z ----
+// ---- Convert Date to local ISO for Google Calendar ----
 function toLocalISOString(date) {
   const tzOffset = date.getTimezoneOffset() * 60000;
   return new Date(date.getTime() - tzOffset).toISOString().slice(0, 19);
@@ -94,7 +96,7 @@ async function createZoomMeeting(token, name, dateTime, duration) {
     body: JSON.stringify({
       topic: `Meeting with ${name}`,
       type: 2,
-      start_time: dateTime.toISOString(),
+      start_time: dateTime.toISOString(), // Zoom uses UTC
       duration,
     }),
   });
@@ -105,14 +107,13 @@ async function createZoomMeeting(token, name, dateTime, duration) {
 
 // ---- Create Google Calendar event ----
 async function createGoogleEvent(token, name, email, start, end, zoomLink) {
-  const timezone = "America/Denver";
   const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       summary: `Zoom Meeting with ${name}`,
-      start: { dateTime: toLocalISOString(start), timeZone: timezone },
-      end: { dateTime: toLocalISOString(end), timeZone: timezone },
+      start: { dateTime: toLocalISOString(start), timeZone: TIME_ZONE },
+      end: { dateTime: toLocalISOString(end), timeZone: TIME_ZONE },
       attendees: [{ email }],
       description: `Join Zoom: ${zoomLink}`,
     }),
@@ -171,7 +172,7 @@ export default async function handler(req, res) {
         {
           name,
           email,
-          time: dateTime.toISOString(),
+          time: dateTime.toISOString(), // store UTC
           end_time: endTime.toISOString(),
           duration: Number(duration),
           zoom_link: zoomLink,
