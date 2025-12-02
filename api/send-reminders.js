@@ -73,10 +73,21 @@ export default async function handler(req, res) {
 
     // 2. Filter bookings starting within the next 15 minutes
     const upcoming = bookings.filter((b) => {
-      // Convert booking time from Mountain Time to UTC
-      const start = new Date(b.start_time + " GMT-0700"); // Assuming start_time stored as "2025-12-02T10:00:00"
-      return start > now && start <= fifteenMinutesFromNow;
+      const start = new Date(b.start_time + " GMT-0700");
+      return start > now && start <= fifteenMinutesFromNow && !b.reminder_sent;
     });
+
+    // ---- QUICK TEST MODE ----
+    // Add this temporary test booking to trigger an immediate reminder
+    const testBooking = {
+      id: "test123",
+      name: "Ash Uchida",
+      email: "ash.uchida0w0@gmail.com",
+      start_time: now.toISOString(),
+      zoom_link: "https://zoom.us/test",
+      reminder_sent: false,
+    };
+    upcoming.push(testBooking);
 
     console.log(`⏰ Bookings needing reminders: ${upcoming.length}`);
 
@@ -95,8 +106,10 @@ export default async function handler(req, res) {
           zoomLink: booking.zoom_link,
         });
 
-        // Mark reminder as sent
-        await supabase.from("bookings").update({ reminder_sent: true }).eq("id", booking.id);
+        // Only mark real bookings in Supabase
+        if (booking.id !== "test123") {
+          await supabase.from("bookings").update({ reminder_sent: true }).eq("id", booking.id);
+        }
 
         sent.push(booking.id);
       } catch (err) {
