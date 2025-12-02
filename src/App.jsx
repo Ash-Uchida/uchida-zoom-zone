@@ -48,7 +48,6 @@ export default function App() {
   };
 
   const fetchBusyTimes = async () => {
-    if (!selectedDate) return [];
     try {
       const dateFormatted = selectedDate.toISOString().split("T")[0];
       const res = await fetch(`/api/calendar/busy?date=${dateFormatted}`);
@@ -67,6 +66,8 @@ export default function App() {
 
     const updateSlots = async () => {
       const busyTimes = await fetchBusyTimes();
+      console.log("Busy times from backend:", busyTimes);
+
       const slots = generateTimeSlots(duration);
 
       const freeSlots = slots.map((slot) => {
@@ -76,6 +77,7 @@ export default function App() {
           const btEnd = new Date(bt.end).getTime();
           return slotStart >= btStart && slotStart < btEnd;
         });
+        if (isBusy) console.log("Slot busy:", slot.time);
         return { ...slot, busy: isBusy };
       });
 
@@ -84,7 +86,7 @@ export default function App() {
     };
 
     updateSlots();
-    const intervalId = setInterval(updateSlots, 10000);
+    const intervalId = setInterval(updateSlots, 10000); // refresh every 10s
     return () => clearInterval(intervalId);
   }, [selectedDate, duration]);
 
