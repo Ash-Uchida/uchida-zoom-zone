@@ -25,11 +25,24 @@ async function sendReminderEmail({ name, email, time, zoomLink }) {
     from: process.env.EMAIL_FROM,
     to: email,
     subject: `Reminder: Your Zoom Meeting in 15 minutes`,
-    html: `<p>Hi ${name},</p>
-           <p>This is a friendly reminder that your meeting is starting at <strong>${timeStr}</strong>.</p>
-           <p>Join Zoom meeting: <a href="${zoomLink}">${zoomLink}</a></p>
-           <p>Thanks,<br/>Zoom Zone</p>`,
+    html: `
+      <p>Hi ${name},</p>
+      <p>This is a friendly reminder that your meeting starts at <strong>${timeStr}</strong>.</p>
+      <p>Join Zoom: <a href="${zoomLink}">${zoomLink}</a></p>
+      <p>Thanks,<br/>Zoom Zone</p>
+    `,
   });
+}
+
+// ---- Extract a Zoom link from event description ----
+function extractZoomLink(event) {
+  if (!event.description) return null;
+
+  // Matches ENTIRE Zoom URL with query params
+  const regex = /https:\/\/us\d*\.zoom\.us\/\S+/i;
+  const match = event.description.match(regex);
+
+  return match ? match[0] : null;
 }
 
 // ---- Fetch Google Calendar events ----
@@ -37,7 +50,7 @@ async function getUpcomingEvents(oAuth2Client) {
   const calendar = google.calendar({ version: "v3", auth: oAuth2Client });
 
   const now = new Date();
-  const inOneHour = new Date(now.getTime() + 60 * 60 * 1000); // next 1 hour
+  const inOneHour = new Date(now.getTime() + 60 * 60000);
 
   const res = await calendar.events.list({
     calendarId: "primary",
@@ -50,14 +63,14 @@ async function getUpcomingEvents(oAuth2Client) {
   return res.data.items || [];
 }
 
-// ---- Vercel API handler ----
+// ---- Main handler ----
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    // Fetch Google integration tokens
+    // Fetch Google tokens from Supabase
     const { data: integrationData, error: integrationError } = await supabase
       .from("integrations")
       .select("*")
@@ -75,51 +88,51 @@ export default async function handler(req, res) {
       process.env.GOOGLE_CLIENT_SECRET,
       process.env.GOOGLE_REDIRECT_URI
     );
+
     oAuth2Client.setCredentials({ access_token, refresh_token });
 
-    // Fetch upcoming events
+    // Get upcoming events
     const events = await getUpcomingEvents(oAuth2Client);
-
     const now = new Date();
 
     for (const event of events) {
       const eventStart = new Date(event.start.dateTime || event.start.date);
       const minutesUntilStart = (eventStart - now) / 60000;
 
+      // Only send a reminder 0–15 minutes before
       if (minutesUntilStart <= 15 && minutesUntilStart >= 0) {
-        // Match event to Supabase booking
-        const { data: bookingData, error: bookingError } = await supabase
+        const zoomLink = extractZoomLink(event);
+        if (!zoomLink) continue;
+
+        // Match booking in Supabase
+        const { data: booking, error: bookingErr } = await supabase
           .from("bookings")
           .select("*")
-          .eq(
-            "zoom_link",
-            event.description?.match(/https:\/\/[\w.-]+/)?.[0] || ""
-          )
+          .eq("zoom_link", zoomLink)
           .eq("reminder_sent", false)
-          .limit(1)
           .single();
 
-        if (bookingError || !bookingData) continue;
+        if (bookingErr || !booking) continue;
 
-        // Send email
+        // Send reminder email
         await sendReminderEmail({
-          name: bookingData.name,
-          email: bookingData.email,
-          time: bookingData.time,
-          zoomLink: bookingData.zoom_link,
+          name: booking.name,
+          email: booking.email,
+          time: booking.time,
+          zoomLink: booking.zoom_link,
         });
 
         // Mark reminder as sent
         await supabase
           .from("bookings")
           .update({ reminder_sent: true })
-          .eq("id", bookingData.id);
+          .eq("id", booking.id);
       }
     }
 
-    return res
-      .status(200)
-      .json({ message: "Reminders checked and sent where needed." });
+    return res.status(200).json({
+      message: "Reminders checked and sent where needed.",
+    });
   } catch (err) {
     console.error("Error in send-reminders:", err);
     return res.status(500).json({ error: err.message });
