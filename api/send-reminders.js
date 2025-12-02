@@ -8,14 +8,14 @@ const {
   EMAIL_USER,
   EMAIL_PASS,
   EMAIL_FROM,
-  TIME_ZONE = "America/Denver", // default time zone, can override
+  TIME_ZONE = "America/Denver", // default, can override in env
 } = process.env;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // ---- Email helper ----
 async function sendReminderEmail({ name, email, time, zoomLink }) {
-  // Format the meeting time in local timezone
+  // Format the time in your local time zone for display
   const timeStr = new Date(time).toLocaleString("en-US", {
     timeZone: TIME_ZONE,
     dateStyle: "short",
@@ -43,31 +43,33 @@ export default async function handler(req, res) {
   try {
     console.log("➡️ Starting reminder check...");
 
-    // 1. Get all bookings
+    // 1. Get all bookings from Supabase
     const { data: bookings, error } = await supabase.from("bookings").select("*");
+
     if (error) {
       console.error("❌ Supabase fetch error:", error);
       return res.status(500).json({ error: "Failed to fetch bookings" });
     }
+
     console.log(`📌 Found ${bookings.length} bookings`);
 
-    // 2. Compute current time and reminder window in local timezone
-    const nowUTC = new Date();
-    const nowLocal = new Date(nowUTC.toLocaleString("en-US", { timeZone: TIME_ZONE }));
-    const oneHourFromNow = new Date(nowLocal.getTime() + 60 * 60000);
+    // 2. Current UTC time and 1 hour window
+    const now = new Date();
+    const oneHourFromNow = new Date(now.getTime() + 60 * 60000);
 
-    console.log(`🕒 Current time (local): ${nowLocal.toISOString()}`);
+    console.log(`🕒 Current UTC time: ${now.toISOString()}`);
     console.log(`🕒 Reminder window ends at: ${oneHourFromNow.toISOString()}`);
 
-    // 3. Filter upcoming bookings in local timezone
+    // 3. Filter bookings starting in next 1 hour (UTC comparison)
     const upcoming = bookings.filter((b) => {
-      const startLocal = new Date(
-        new Date(b.time).toLocaleString("en-US", { timeZone: TIME_ZONE })
-      );
+      const startUTC = new Date(b.time).getTime(); // UTC milliseconds
+      const nowTime = now.getTime();
+
       console.log(
-        `Booking ID ${b.id}: stored UTC = ${b.time}, parsed local = ${startLocal.toISOString()}, reminder_sent = ${b.reminder_sent}`
+        `Booking ID ${b.id}: stored UTC = ${b.time}, reminder_sent = ${b.reminder_sent}`
       );
-      return startLocal > nowLocal && startLocal <= oneHourFromNow && !b.reminder_sent;
+
+      return startUTC > nowTime && startUTC <= nowTime + 60 * 60000 && !b.reminder_sent;
     });
 
     console.log(`⏰ Bookings needing reminders: ${upcoming.length}`);
@@ -75,10 +77,11 @@ export default async function handler(req, res) {
     const sent = [];
     const failed = [];
 
-    // 4. Send reminders
+    // 4. Send reminder emails
     for (const booking of upcoming) {
       try {
         console.log(`📨 Sending reminder for booking ID ${booking.id} at ${booking.time}`);
+
         await sendReminderEmail({
           name: booking.name,
           email: booking.email,
@@ -86,7 +89,7 @@ export default async function handler(req, res) {
           zoomLink: booking.zoom_link,
         });
 
-        // Update Supabase to mark reminder sent
+        // Mark reminder as sent
         await supabase.from("bookings").update({ reminder_sent: true }).eq("id", booking.id);
         sent.push(booking.id);
       } catch (err) {
@@ -99,12 +102,11 @@ export default async function handler(req, res) {
       message: "Reminder check complete",
       sent,
       failed,
-      debugNow: nowLocal.toISOString(),
+      debugNow: now.toISOString(),
       debugWindowEnd: oneHourFromNow.toISOString(),
       debugUpcomingBookings: upcoming.map((b) => ({
         id: b.id,
         time: b.time,
-        parsedStartLocal: new Date(b.time).toLocaleString("en-US", { timeZone: TIME_ZONE }),
         reminder_sent: b.reminder_sent,
       })),
     });
