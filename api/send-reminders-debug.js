@@ -1,4 +1,3 @@
-// /api/send-reminders-debug.js
 import { google } from "googleapis";
 import { createClient } from "@supabase/supabase-js";
 
@@ -7,25 +6,15 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-function extractZoomLink(event) {
-  if (!event.description) return null;
-  const regex = /https:\/\/us\d*\.zoom\.us\/\S+/i;
-  const match = event.description.match(regex);
-  return match ? match[0] : null;
-}
-
 export default async function handler(req, res) {
   try {
     console.log("DEBUG: Handler started");
 
-    // Fetch Google tokens
-    const { data: integrationData, error: integrationError } = await supabase
+    const { data: integrationData } = await supabase
       .from("integrations")
       .select("*")
       .eq("id", "google")
       .single();
-
-    console.log("DEBUG: Integration data:", integrationData);
 
     const { access_token, refresh_token } = integrationData;
 
@@ -41,7 +30,6 @@ export default async function handler(req, res) {
     const now = new Date();
     const inOneHour = new Date(now.getTime() + 60 * 60000);
 
-    // ---- GET EVENTS ----
     const result = await calendar.events.list({
       calendarId: "primary",
       timeMin: now.toISOString(),
@@ -51,24 +39,25 @@ export default async function handler(req, res) {
     });
 
     const events = result.data.items || [];
-
-    console.log("DEBUG: Found events:", events.length);
-
     const details = [];
 
     for (const event of events) {
-      const zoom = extractZoomLink(event);
+      const zoomFromDescription = event.description?.match(/https:\/\/\S+/)?.[0] || null;
+
+      // NEW: Find Zoom link in conferenceData
+      let zoomFromConference = null;
+      if (event.conferenceData?.entryPoints) {
+        const zoomPoint = event.conferenceData.entryPoints.find(
+          (p) => p.entryPointType === "video" && p.uri.includes("zoom")
+        );
+        if (zoomPoint) zoomFromConference = zoomPoint.uri;
+      }
 
       details.push({
         summary: event.summary,
         start: event.start,
-        zoomLink: zoom,
-      });
-
-      console.log("DEBUG EVENT:", {
-        summary: event.summary,
-        description: event.description,
-        zoomLink: zoom,
+        zoomFromDescription,
+        zoomFromConference,
       });
     }
 
