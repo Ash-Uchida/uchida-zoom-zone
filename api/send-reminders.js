@@ -1,106 +1,118 @@
+// /api/send-reminders.js
 import { google } from "googleapis";
-import { NextResponse } from "next/server";
+import nodemailer from "nodemailer";
+import { createClient } from "@supabase/supabase-js";
 
-export async function POST(req) {
+// --- Supabase setup ---
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
+
+// --- Nodemailer setup ---
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+// --- Helper to convert Date to local ISO without Z ---
+function toLocalISOString(date) {
+  const tzOffset = date.getTimezoneOffset() * 60000; // in ms
+  return new Date(date.getTime() - tzOffset).toISOString().slice(0, 19);
+}
+
+// --- Fetch Google token from Supabase ---
+async function getGoogleAccessToken() {
+  const { data, error } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", "google")
+    .single();
+
+  if (error || !data) throw new Error(error?.message || "No Google integration found");
+
+  // Check token expiration and refresh if needed
+  const oAuth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+
+  oAuth2Client.setCredentials({
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+  });
+
+  // Force refresh to make sure token is valid
+  const { credentials } = await oAuth2Client.refreshAccessToken();
+  await supabase.from("integrations").upsert({
+    id: "google",
+    access_token: credentials.access_token,
+    refresh_token: data.refresh_token,
+    updated_at: new Date().toISOString(),
+  });
+
+  return credentials.access_token;
+}
+
+// --- Send reminder email ---
+async function sendReminderEmail({ to, meeting }) {
+  const startTime = new Date(meeting.start.dateTime || meeting.start.date);
+  const startStr = startTime.toLocaleString();
+
+  const html = `<p>Hi,</p>
+    <p>This is a reminder that your meeting "<strong>${meeting.summary}</strong>" starts at <strong>${startStr}</strong>.</p>
+    <p>Zoom link: <a href="${meeting.description}">${meeting.description}</a></p>
+    <p>Thanks,<br/>Zoom Zone</p>`;
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM,
+    to,
+    subject: `Reminder: ${meeting.summary} at ${startStr}`,
+    html,
+  });
+}
+
+// --- Main API handler ---
+export default async function handler(req, res) {
   try {
-    const secret = req.headers.get("authorization");
+    // Get Google access token
+    const accessToken = await getGoogleAccessToken();
+    const oAuth2Client = new google.auth.OAuth2();
+    oAuth2Client.setCredentials({ access_token: accessToken });
 
-    if (!secret || secret !== `Bearer ${process.env.CRON_SECRET}`) {
-      console.log("❌ Invalid cron secret");
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const calendar = google.calendar({ version: "v3", auth: oAuth2Client });
 
-    console.log("🔄 Cron job triggered at:", new Date().toISOString());
-
-    // Authenticate service account
-    const auth = new google.auth.JWT(
-      process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      null,
-      process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-      ["https://www.googleapis.com/auth/calendar.readonly"]
-    );
-
-    const calendar = google.calendar({ version: "v3", auth });
-
-    // Calculate the time window
     const now = new Date();
-    const in15 = new Date(now.getTime() + 15 * 60 * 1000);
+    const fifteenMinutesLater = new Date(now.getTime() + 15 * 60 * 1000);
 
-    console.log("🔍 Searching Google Calendar for events:");
-    console.log("   👉 TimeMin:", now.toISOString());
-    console.log("   👉 TimeMax:", in15.toISOString());
-
-    // Query Google Calendar
+    // Fetch events in the next 15 minutes
     const response = await calendar.events.list({
-      calendarId: process.env.GOOGLE_CALENDAR_ID,
+      calendarId: "primary",
       timeMin: now.toISOString(),
-      timeMax: in15.toISOString(),
+      timeMax: fifteenMinutesLater.toISOString(),
       singleEvents: true,
-      orderBy: "startTime"
+      orderBy: "startTime",
     });
 
     const events = response.data.items || [];
-    console.log(`📅 Found ${events.length} events in next 15 minutes`);
 
-    if (events.length === 0) {
-      return NextResponse.json({ message: "No events to notify" });
-    }
-
-    const emailsSent = [];
-
+    // Loop through events and send reminders
     for (const event of events) {
-      console.log("📌 Event:", {
-        summary: event.summary,
-        start: event.start?.dateTime,
-        attendees: event.attendees
-      });
-
-      if (!event.attendees || event.attendees.length === 0) {
-        console.log("⚠️ No attendees for event, skipping");
-        continue;
-      }
-
-      // Send a reminder email to each attendee
-      for (const attendee of event.attendees) {
-        if (!attendee.email) continue;
-
-        const email = attendee.email;
-        console.log(`📨 Sending reminder email to: ${email}`);
-
-        const sendRes = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${process.env.RESEND_API_KEY}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            from: process.env.EMAIL_FROM,
-            to: email,
-            subject: `Upcoming Meeting: ${event.summary}`,
-            html: `
-              <p>Hi there!</p>
-              <p>This is a reminder that your Zoom meeting <strong>${event.summary}</strong> starts in 15 minutes.</p>
-              <p>See you soon!</p>
-              <hr />
-              <p>Sent automatically by Ash's Zoom Zone 🔔</p>
-            `
-          })
-        });
-
-        const sendJson = await sendRes.json();
-        console.log("📧 Resend API response:", sendJson);
-
-        emailsSent.push(email);
+      // Only send reminder if we haven't sent it yet (optional: track in Supabase)
+      const attendees = event.attendees || [];
+      for (const attendee of attendees) {
+        // Skip yourself
+        if (attendee.email === process.env.EMAIL_FROM) continue;
+        await sendReminderEmail({ to: attendee.email, meeting: event });
       }
     }
 
-    return NextResponse.json({
-      message: "Done",
-      emailsSent
-    });
-
+    return res.status(200).json({ message: "Reminders sent", sentCount: events.length });
   } catch (err) {
-    console.error("🔥 ERROR in send-reminders:", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error("Error sending reminders:", err);
+    return res.status(500).json({ error: err.message });
   }
 }
