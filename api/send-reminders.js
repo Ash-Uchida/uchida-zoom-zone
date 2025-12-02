@@ -1,18 +1,20 @@
-// /api/send-reminders.js
 import { google } from "googleapis";
 import { createClient } from "@supabase/supabase-js";
+import nodemailer from "nodemailer";
 
 // Load environment variables
 const {
   GOOGLE_PRIVATE_KEY,
   GOOGLE_CLIENT_EMAIL,
-  GOOGLE_PROJECT_ID,
   SUPABASE_URL,
-  SUPABASE_ANON_KEY
+  SUPABASE_SERVICE_KEY,
+  EMAIL_USER,
+  EMAIL_PASS,
+  EMAIL_FROM,
 } = process.env;
 
 // Initialize Supabase
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // Google Auth setup
 const auth = new google.auth.JWT(
@@ -24,17 +26,40 @@ const auth = new google.auth.JWT(
 
 const calendar = google.calendar({ version: "v3", auth });
 
-// 15-minute reminder window
-const REMINDER_MINUTES = 15;
+// ---- Email helper ----
+async function sendReminderEmail({ name, email, time, zoomLink }) {
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: EMAIL_USER,
+      pass: EMAIL_PASS,
+    },
+  });
 
+  const timeStr = new Date(time).toLocaleString("en-US", {
+    timeZone: "America/Denver",
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+
+  await transporter.sendMail({
+    from: EMAIL_FROM,
+    to: email,
+    subject: `Reminder: Your Zoom Meeting in 15 minutes`,
+    html: `<p>Hi ${name},</p>
+           <p>This is a friendly reminder that your meeting is starting at <strong>${timeStr}</strong>.</p>
+           <p>Join Zoom meeting: <a href="${zoomLink}">${zoomLink}</a></p>
+           <p>Thanks,<br/>Zoom Zone</p>`,
+  });
+}
+
+// ---- Vercel API handler ----
 export default async function handler(req, res) {
   try {
     console.log("➡️ Starting reminder check...");
 
     // 1. Get all bookings from Supabase
-    const { data: bookings, error } = await supabase
-      .from("bookings")
-      .select("*");
+    const { data: bookings, error } = await supabase.from("bookings").select("*");
 
     if (error) {
       console.error("❌ Supabase fetch error:", error);
@@ -44,12 +69,13 @@ export default async function handler(req, res) {
     console.log(`📌 Found ${bookings.length} bookings`);
 
     const now = new Date();
-    const reminderWindowEnd = new Date(now.getTime() + REMINDER_MINUTES * 60000);
+    const fifteenMinutesFromNow = new Date(now.getTime() + 15 * 60000);
 
-    // 2. Filter bookings starting within the next REMINDER_MINUTES
+    // 2. Filter bookings starting within the next 15 minutes
     const upcoming = bookings.filter((b) => {
-      const start = new Date(b.start_time);
-      return start > now && start <= reminderWindowEnd && !b.reminder_sent;
+      // Convert booking time from Mountain Time to UTC
+      const start = new Date(b.start_time + " GMT-0700"); // Assuming start_time stored as "2025-12-02T10:00:00"
+      return start > now && start <= fifteenMinutesFromNow;
     });
 
     console.log(`⏰ Bookings needing reminders: ${upcoming.length}`);
@@ -57,46 +83,24 @@ export default async function handler(req, res) {
     let sent = [];
     let failed = [];
 
+    // 3. Send reminder emails
     for (const booking of upcoming) {
       try {
-        console.log(`📨 Processing booking: ${booking.id}, time: ${booking.start_time}`);
+        console.log(`📨 Sending reminder for booking: ${booking.id}`);
 
-        // Fetch the corresponding Google Calendar event
-        const event = await calendar.events.get({
-          calendarId: "primary",
-          eventId: booking.event_id
+        await sendReminderEmail({
+          name: booking.name,
+          email: booking.email,
+          time: booking.start_time,
+          zoomLink: booking.zoom_link,
         });
 
-        if (!event.data) {
-          console.warn(`⚠️ Event not found on Google Calendar: ${booking.event_id}`);
-          failed.push({ bookingId: booking.id, reason: "Event not found" });
-          continue;
-        }
+        // Mark reminder as sent
+        await supabase.from("bookings").update({ reminder_sent: true }).eq("id", booking.id);
 
-        // Send reminder via Google Calendar
-        await calendar.events.patch({
-          calendarId: "primary",
-          eventId: booking.event_id,
-          sendUpdates: "all",
-          requestBody: {
-            reminders: {
-              useDefault: false,
-              overrides: [{ method: "email", minutes: REMINDER_MINUTES }]
-            }
-          }
-        });
-
-        console.log(`✅ Reminder sent for booking: ${booking.id}`);
         sent.push(booking.id);
-
-        // Mark reminder as sent in Supabase
-        await supabase
-          .from("bookings")
-          .update({ reminder_sent: true })
-          .eq("id", booking.id);
-
       } catch (err) {
-        console.error(`❌ Error processing booking ${booking.id}:`, err.message);
+        console.error("❌ Error sending reminder:", err);
         failed.push({ bookingId: booking.id, error: err.message });
       }
     }
@@ -106,9 +110,8 @@ export default async function handler(req, res) {
       sent,
       failed,
       debugNow: now.toISOString(),
-      debugWindowEnd: reminderWindowEnd.toISOString()
+      debugWindowEnd: fifteenMinutesFromNow.toISOString(),
     });
-
   } catch (e) {
     console.error("🔥 SERVER ERROR:", e);
     return res.status(500).json({ error: e.message });
