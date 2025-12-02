@@ -16,17 +16,10 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 async function sendReminderEmail({ name, email, time, zoomLink }) {
   const transporter = nodemailer.createTransport({
     service: "gmail",
-    auth: {
-      user: EMAIL_USER,
-      pass: EMAIL_PASS,
-    },
+    auth: { user: EMAIL_USER, pass: EMAIL_PASS },
   });
 
-  const timeStr = new Date(time).toLocaleString("en-US", {
-    timeZone: "America/Denver",
-    dateStyle: "short",
-    timeStyle: "short",
-  });
+  const timeStr = new Date(time).toLocaleString(); // server/local timezone
 
   await transporter.sendMail({
     from: EMAIL_FROM,
@@ -57,9 +50,15 @@ export default async function handler(req, res) {
     const now = new Date();
     const oneHourFromNow = new Date(now.getTime() + 60 * 60000);
 
+    console.log(`🕒 Current time: ${now.toISOString()}`);
+    console.log(`🕒 Reminder window ends at: ${oneHourFromNow.toISOString()}`);
+
     // 2. Filter bookings starting within the next 1 hour and not yet reminded
     const upcoming = bookings.filter((b) => {
-      const start = new Date(b.time);
+      const start = new Date(b.time); // parse as local time
+
+      console.log(`Booking ID ${b.id}: stored time = ${b.time}, parsed start = ${start.toISOString()}, reminder_sent = ${b.reminder_sent}`);
+
       return start > now && start <= oneHourFromNow && !b.reminder_sent;
     });
 
@@ -71,7 +70,7 @@ export default async function handler(req, res) {
     // 3. Send reminder emails
     for (const booking of upcoming) {
       try {
-        console.log(`📨 Sending reminder for booking: ${booking.id}`);
+        console.log(`📨 Sending reminder for booking ID ${booking.id} at ${booking.time}`);
 
         await sendReminderEmail({
           name: booking.name,
@@ -96,6 +95,12 @@ export default async function handler(req, res) {
       failed,
       debugNow: now.toISOString(),
       debugWindowEnd: oneHourFromNow.toISOString(),
+      debugUpcomingBookings: upcoming.map((b) => ({
+        id: b.id,
+        time: b.time,
+        parsedStart: new Date(b.time).toISOString(),
+        reminder_sent: b.reminder_sent,
+      })),
     });
   } catch (e) {
     console.error("🔥 SERVER ERROR:", e);
