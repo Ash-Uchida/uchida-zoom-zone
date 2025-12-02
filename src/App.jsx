@@ -27,7 +27,6 @@ export default function App() {
     setTime("");
   };
 
-  // Generate timeslots from 6am to 10pm
   const generateTimeSlots = (durationMinutes = 15) => {
     const slots = [];
     const now = new Date();
@@ -37,7 +36,6 @@ export default function App() {
     end.setHours(22, 0, 0, 0);
 
     let slotTime = new Date(start);
-
     while (slotTime <= end) {
       if (slotTime > now || slotTime.toDateString() !== now.toDateString()) {
         const hh = slotTime.getHours().toString().padStart(2, "0");
@@ -46,48 +44,59 @@ export default function App() {
       }
       slotTime = new Date(slotTime.getTime() + durationMinutes * 60000);
     }
-
     return slots;
   };
 
-  // Fetch busy times from Google Calendar (with polling every 10 seconds)
+  // Retry fetch helper
+  const fetchBusyTimesWithRetry = async (retries = 1) => {
+    try {
+      const dateFormatted = selectedDate.toISOString().split("T")[0];
+      const res = await fetch(`/api/calendar/busy?date=${dateFormatted}`);
+      if (!res.ok) throw new Error("Failed to fetch busy times");
+
+      const data = await res.json();
+      return data.busyTimes || [];
+    } catch (err) {
+      if (retries > 0) {
+        console.warn("Retrying fetchBusyTimes due to error:", err);
+        return fetchBusyTimesWithRetry(retries - 1);
+      } else {
+        console.error("Failed to fetch busy times:", err);
+        return [];
+      }
+    }
+  };
+
   useEffect(() => {
     if (!selectedDate) return;
     setLoadingSlots(true);
 
     let intervalId;
 
-    const fetchBusyTimes = async () => {
-      try {
-        const dateFormatted = selectedDate.toISOString().split("T")[0];
-        const res = await fetch(`/api/calendar/busy?date=${dateFormatted}`);
-        const data = await res.json();
+    const updateSlots = async () => {
+      const busyTimes = await fetchBusyTimesWithRetry(1); // Retry once
 
-        const slots = generateTimeSlots(duration);
+      const slots = generateTimeSlots(duration);
 
-        const freeSlots = slots.map((slot) => {
-          const slotStart = new Date(`${dateFormatted}T${slot.time}:00`).getTime();
-          const isBusy = data.busyTimes.some((bt) => {
-            const btStart = new Date(bt.start).getTime();
-            const btEnd = new Date(bt.end).getTime();
-            return slotStart >= btStart && slotStart < btEnd;
-          });
-          return { ...slot, busy: isBusy };
+      const freeSlots = slots.map((slot) => {
+        const slotStart = new Date(`${selectedDate.toISOString().split("T")[0]}T${slot.time}:00`).getTime();
+        const isBusy = busyTimes.some((bt) => {
+          const btStart = new Date(bt.start).getTime();
+          const btEnd = new Date(bt.end).getTime();
+          return slotStart >= btStart && slotStart < btEnd;
         });
+        return { ...slot, busy: isBusy };
+      });
 
-        setAvailableSlots(freeSlots);
-      } catch (err) {
-        console.error("Failed to fetch busy times:", err);
-      } finally {
-        setLoadingSlots(false);
-      }
+      setAvailableSlots(freeSlots);
+      setLoadingSlots(false);
     };
 
     // Initial fetch
-    fetchBusyTimes();
+    updateSlots();
 
     // Poll every 10 seconds
-    intervalId = setInterval(fetchBusyTimes, 10000);
+    intervalId = setInterval(updateSlots, 10000);
 
     return () => clearInterval(intervalId);
   }, [selectedDate, duration]);
@@ -101,7 +110,6 @@ export default function App() {
 
     try {
       const dateFormatted = selectedDate.toISOString().split("T")[0];
-
       const res = await fetch("/api/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
