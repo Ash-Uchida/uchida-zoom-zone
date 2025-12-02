@@ -47,23 +47,17 @@ export default function App() {
     return slots;
   };
 
-  // Retry fetch helper
-  const fetchBusyTimesWithRetry = async (retries = 1) => {
+  const fetchBusyTimes = async () => {
+    if (!selectedDate) return [];
     try {
       const dateFormatted = selectedDate.toISOString().split("T")[0];
       const res = await fetch(`/api/calendar/busy?date=${dateFormatted}`);
       if (!res.ok) throw new Error("Failed to fetch busy times");
-
       const data = await res.json();
       return data.busyTimes || [];
     } catch (err) {
-      if (retries > 0) {
-        console.warn("Retrying fetchBusyTimes due to error:", err);
-        return fetchBusyTimesWithRetry(retries - 1);
-      } else {
-        console.error("Failed to fetch busy times:", err);
-        return [];
-      }
+      console.error("Error fetching busy times:", err);
+      return [];
     }
   };
 
@@ -71,23 +65,17 @@ export default function App() {
     if (!selectedDate) return;
     setLoadingSlots(true);
 
-    let intervalId;
-
     const updateSlots = async () => {
-      const busyTimes = await fetchBusyTimesWithRetry(1);
-
+      const busyTimes = await fetchBusyTimes();
       const slots = generateTimeSlots(duration);
 
       const freeSlots = slots.map((slot) => {
         const slotStart = new Date(`${selectedDate.toISOString().split("T")[0]}T${slot.time}:00`).getTime();
-        const slotEnd = slotStart + duration * 60000;
-
         const isBusy = busyTimes.some((bt) => {
           const btStart = new Date(bt.start).getTime();
           const btEnd = new Date(bt.end).getTime();
-          return slotStart < btEnd && slotEnd > btStart; // any overlap
+          return slotStart >= btStart && slotStart < btEnd;
         });
-
         return { ...slot, busy: isBusy };
       });
 
@@ -96,9 +84,7 @@ export default function App() {
     };
 
     updateSlots();
-
-    intervalId = setInterval(updateSlots, 10000); // poll every 10 sec
-
+    const intervalId = setInterval(updateSlots, 10000);
     return () => clearInterval(intervalId);
   }, [selectedDate, duration]);
 

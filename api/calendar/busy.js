@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
-// Helper to refresh Google access token
+// Refresh Google access token if expired
 async function refreshGoogleToken(refreshToken) {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -20,7 +20,6 @@ async function refreshGoogleToken(refreshToken) {
   const data = await res.json();
   if (data.error) throw new Error("Google token refresh failed: " + JSON.stringify(data));
 
-  // Save new access_token to Supabase
   await supabase.from("integrations").upsert({
     id: "google",
     access_token: data.access_token,
@@ -32,7 +31,7 @@ async function refreshGoogleToken(refreshToken) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.setHeader("Cache-Control", "no-store, max-age=0"); // prevent 304 caching
 
   try {
     const { date } = req.query;
@@ -44,19 +43,25 @@ export default async function handler(req, res) {
     const dayEnd = new Date(selectedDate);
     dayEnd.setHours(23, 59, 59, 999);
 
-    // Fetch Google integration tokens from Supabase
-    const { data, error } = await supabase.from("integrations").select("*").eq("id", "google").single();
-    if (error || !data) throw new Error(error?.message || "No Google integration found");
+    // Fetch Google integration token
+    const { data: integration, error } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("id", "google")
+      .single();
 
-    let { access_token, refresh_token } = data;
+    if (error || !integration) throw new Error("No Google integration found");
 
-    // Set up OAuth2 client
-    const oAuth2Client = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+    let { access_token, refresh_token } = integration;
+
+    const oAuth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET
+    );
     oAuth2Client.setCredentials({ access_token, refresh_token });
 
     const calendar = google.calendar({ version: "v3", auth: oAuth2Client });
 
-    // Fetch busy events for the selected date
     let events;
     try {
       const response = await calendar.events.list({
@@ -69,7 +74,7 @@ export default async function handler(req, res) {
       events = response.data.items || [];
     } catch (err) {
       if (err.code === 401) {
-        // Token expired, refresh it
+        // token expired, refresh
         access_token = await refreshGoogleToken(refresh_token);
         oAuth2Client.setCredentials({ access_token, refresh_token });
 
@@ -86,7 +91,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // Map events to busy times for frontend
     const busyTimes = events.map((event) => ({
       start: event.start.dateTime || event.start.date,
       end: event.end.dateTime || event.end.date,
