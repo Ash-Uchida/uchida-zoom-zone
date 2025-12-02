@@ -1,6 +1,7 @@
 // api/send-reminders.js
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
+import { DateTime } from "luxon";
 
 const {
   SUPABASE_URL,
@@ -8,21 +9,17 @@ const {
   EMAIL_USER,
   EMAIL_PASS,
   EMAIL_FROM,
-
-  // 🔥 Correct Idaho timezone (MST/MDT automatically handled)
-  TIME_ZONE = "America/Boise",
+  TIME_ZONE = "America/Boise", // Idaho default
 } = process.env;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // ---- Email helper ----
-async function sendReminderEmail({ name, email, time, zoomLink }) {
-  // Format the time in local Idaho time for the email
-  const timeStr = new Date(time).toLocaleString("en-US", {
-    timeZone: TIME_ZONE,
-    dateStyle: "short",
-    timeStyle: "short",
-  });
+async function sendReminderEmail({ name, email, utcTime, zoomLink }) {
+  // Convert UTC → Local (MST/MDT automatically)
+  const local = DateTime.fromISO(utcTime, { zone: "utc" })
+    .setZone(TIME_ZONE)
+    .toLocaleString(DateTime.DATETIME_SHORT);
 
   const transporter = nodemailer.createTransport({
     service: "gmail",
@@ -32,95 +29,88 @@ async function sendReminderEmail({ name, email, time, zoomLink }) {
   await transporter.sendMail({
     from: EMAIL_FROM,
     to: email,
-    subject: `Meeting Reminder - ${timeStr}`,
+    subject: `Meeting Reminder - ${local}`,
     html: `<p>Hi ${name},</p>
-           <p>This is a reminder for your meeting at <strong>${timeStr}</strong> with Ash.</p>
+           <p>This is a reminder for your meeting at <strong>${local}</strong>.</p>
            <p>Zoom link: <a href="${zoomLink}">${zoomLink}</a></p>
-           <p>Thanks,<br/>Ash Uchida</p>`,
+           <p>- Ash Uchida</p>`,
   });
 }
 
 // ---- Main handler ----
 export default async function handler(req, res) {
   try {
-    console.log("➡️ Starting reminder check...");
+    console.log("➡️ Checking reminders...");
 
-    // 1. Fetch all bookings
+    // 1. Get bookings
     const { data: bookings, error } = await supabase.from("bookings").select("*");
 
     if (error) {
-      console.error("❌ Supabase fetch error:", error);
+      console.error("Supabase error:", error);
       return res.status(500).json({ error: "Failed to fetch bookings" });
     }
 
-    console.log(`📌 Found ${bookings.length} bookings`);
+    console.log(`📌 Total bookings: ${bookings.length}`);
 
-    // 2. Calculate now and 1-hour window in UTC
-    const now = new Date();
-    const oneHourFromNow = new Date(now.getTime() + 60 * 60000);
+    // Current time in UTC
+    const nowUTC = DateTime.utc();
+    const windowEnd = nowUTC.plus({ minutes: 60 });
 
-    console.log(`🕒 Current UTC time: ${now.toISOString()}`);
-    console.log(`🕒 Reminder window ends at: ${oneHourFromNow.toISOString()}`);
+    console.log("🕒 Now (UTC):", nowUTC.toISO());
+    console.log("🕒 Window end (UTC):", windowEnd.toISO());
 
-    // 3. Filter bookings whose UTC start time is within the next hour
+    // 2. Filter bookings happening within 60 minutes
     const upcoming = bookings.filter((b) => {
-      const startUTC = new Date(b.time).getTime();
-      const nowUTC = now.getTime();
-      const inWindow = startUTC > nowUTC && startUTC <= nowUTC + 60 * 60000;
+      const startUTC = DateTime.fromISO(b.time, { zone: "utc" });
 
       console.log(
-        `Booking ID ${b.id}: stored UTC=${b.time}, ` +
-        `startUTC=${startUTC}, inWindow=${inWindow}, reminder_sent=${b.reminder_sent}`
+        `Booking ${b.id}: stored=${b.time}, asUTC=${startUTC.toISO()}, reminder_sent=${b.reminder_sent}`
       );
 
-      return inWindow && !b.reminder_sent;
+      return (
+        startUTC > nowUTC &&
+        startUTC <= windowEnd &&
+        b.reminder_sent === false
+      );
     });
 
-    console.log(`⏰ Bookings needing reminders: ${upcoming.length}`);
+    console.log(`⏰ Number needing reminders: ${upcoming.length}`);
 
     const sent = [];
     const failed = [];
 
-    // 4. Send reminders
-    for (const booking of upcoming) {
+    // 3. Send emails + update DB
+    for (const b of upcoming) {
       try {
-        console.log(`📨 Sending reminder for booking ID ${booking.id}`);
-
         await sendReminderEmail({
-          name: booking.name,
-          email: booking.email,
-          time: booking.time,
-          zoomLink: booking.zoom_link,
+          name: b.name,
+          email: b.email,
+          utcTime: b.time,
+          zoomLink: b.zoom_link,
         });
 
-        // Mark as sent
         await supabase
           .from("bookings")
           .update({ reminder_sent: true })
-          .eq("id", booking.id);
+          .eq("id", b.id);
 
-        sent.push(booking.id);
+        sent.push(b.id);
       } catch (err) {
-        console.error("❌ Error sending reminder:", err);
-        failed.push({ bookingId: booking.id, error: err.message });
+        console.error("❌ Email send error:", err);
+        failed.push({ id: b.id, error: err.message });
       }
     }
 
-    // Response
     return res.status(200).json({
       message: "Reminder check complete",
       sent,
       failed,
-      debugNow: now.toISOString(),
-      debugWindowEnd: oneHourFromNow.toISOString(),
-      debugUpcomingBookings: upcoming.map((b) => ({
-        id: b.id,
-        time: b.time,
-        reminder_sent: b.reminder_sent,
-      })),
+      nowUTC: nowUTC.toISO(),
+      windowEnd: windowEnd.toISO(),
+      upcoming,
     });
-  } catch (e) {
-    console.error("🔥 SERVER ERROR:", e);
-    return res.status(500).json({ error: e.message });
+  } catch (err) {
+    console.error("🔥 Server error:", err);
+    return res.status(500).json({ error: err.message });
   }
 }
