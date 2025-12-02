@@ -2,7 +2,6 @@
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 
-// Load environment variables
 const {
   SUPABASE_URL,
   SUPABASE_SERVICE_KEY,
@@ -11,7 +10,6 @@ const {
   EMAIL_FROM,
 } = process.env;
 
-// Initialize Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // ---- Email helper ----
@@ -37,7 +35,7 @@ async function sendReminderEmail({ name, email, time, zoomLink }) {
     html: `<p>Hi ${name},</p>
            <p>This is a friendly reminder for your meeting scheduled at <strong>${timeStr}</strong> with Ash.</p>
            <p>Join Zoom meeting: <a href="${zoomLink}">${zoomLink}</a></p>
-           <p>Thanks,<br/>Zoom Zone</p>`,
+           <p>Thanks,<br/>Ash Uchida</p>`,
   });
 }
 
