@@ -8,18 +8,20 @@ const {
   EMAIL_USER,
   EMAIL_PASS,
   EMAIL_FROM,
+  TIME_ZONE = "America/Denver", // default time zone, you can override
 } = process.env;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // ---- Email helper ----
 async function sendReminderEmail({ name, email, time, zoomLink }) {
+  // Format the meeting time in your local time zone
+  const timeStr = new Date(time).toLocaleString("en-US", { timeZone: TIME_ZONE, dateStyle: "short", timeStyle: "short" });
+
   const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: { user: EMAIL_USER, pass: EMAIL_PASS },
   });
-
-  const timeStr = new Date(time).toLocaleString(); // server/local timezone
 
   await transporter.sendMail({
     from: EMAIL_FROM,
@@ -47,19 +49,19 @@ export default async function handler(req, res) {
 
     console.log(`📌 Found ${bookings.length} bookings`);
 
+    // 2. Use local time zone for now and window
     const now = new Date();
-    const oneHourFromNow = new Date(now.getTime() + 60 * 60000);
+    const nowLocal = new Date(now.toLocaleString("en-US", { timeZone: TIME_ZONE }));
+    const oneHourFromNow = new Date(nowLocal.getTime() + 60 * 60000);
 
-    console.log(`🕒 Current time: ${now.toISOString()}`);
+    console.log(`🕒 Current time (local): ${nowLocal.toISOString()}`);
     console.log(`🕒 Reminder window ends at: ${oneHourFromNow.toISOString()}`);
 
-    // 2. Filter bookings starting within the next 1 hour and not yet reminded
+    // 3. Filter bookings in local time zone
     const upcoming = bookings.filter((b) => {
-      const start = new Date(b.time); // parse as local time
-
-      console.log(`Booking ID ${b.id}: stored time = ${b.time}, parsed start = ${start.toISOString()}, reminder_sent = ${b.reminder_sent}`);
-
-      return start > now && start <= oneHourFromNow && !b.reminder_sent;
+      const startLocal = new Date(new Date(b.time).toLocaleString("en-US", { timeZone: TIME_ZONE }));
+      console.log(`Booking ID ${b.id}: stored time = ${b.time}, parsed start (local) = ${startLocal.toISOString()}, reminder_sent = ${b.reminder_sent}`);
+      return startLocal > nowLocal && startLocal <= oneHourFromNow && !b.reminder_sent;
     });
 
     console.log(`⏰ Bookings needing reminders: ${upcoming.length}`);
@@ -67,11 +69,10 @@ export default async function handler(req, res) {
     let sent = [];
     let failed = [];
 
-    // 3. Send reminder emails
+    // 4. Send reminder emails
     for (const booking of upcoming) {
       try {
         console.log(`📨 Sending reminder for booking ID ${booking.id} at ${booking.time}`);
-
         await sendReminderEmail({
           name: booking.name,
           email: booking.email,
@@ -79,9 +80,8 @@ export default async function handler(req, res) {
           zoomLink: booking.zoom_link,
         });
 
-        // Mark reminder as sent in Supabase
+        // Mark reminder as sent
         await supabase.from("bookings").update({ reminder_sent: true }).eq("id", booking.id);
-
         sent.push(booking.id);
       } catch (err) {
         console.error("❌ Error sending reminder:", err);
@@ -93,7 +93,7 @@ export default async function handler(req, res) {
       message: "Reminder check complete",
       sent,
       failed,
-      debugNow: now.toISOString(),
+      debugNow: nowLocal.toISOString(),
       debugWindowEnd: oneHourFromNow.toISOString(),
       debugUpcomingBookings: upcoming.map((b) => ({
         id: b.id,
