@@ -2,7 +2,7 @@ name: Send Calendar Reminders
 
 on:
   schedule:
-    - cron: "*/1 * * * *"   # every minute
+    - cron: "*/1 * * * *"
   workflow_dispatch:
 
 jobs:
