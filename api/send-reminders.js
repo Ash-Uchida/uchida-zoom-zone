@@ -8,14 +8,16 @@ const {
   EMAIL_USER,
   EMAIL_PASS,
   EMAIL_FROM,
-  TIME_ZONE = "America/Denver", // default, can override in env
+
+  // 🔥 Correct Idaho timezone (MST/MDT automatically handled)
+  TIME_ZONE = "America/Boise",
 } = process.env;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // ---- Email helper ----
 async function sendReminderEmail({ name, email, time, zoomLink }) {
-  // Format the time in your local time zone for display
+  // Format the time in local Idaho time for the email
   const timeStr = new Date(time).toLocaleString("en-US", {
     timeZone: TIME_ZONE,
     dateStyle: "short",
@@ -32,8 +34,8 @@ async function sendReminderEmail({ name, email, time, zoomLink }) {
     to: email,
     subject: `Meeting Reminder - ${timeStr}`,
     html: `<p>Hi ${name},</p>
-           <p>This is a friendly reminder for your meeting scheduled at <strong>${timeStr}</strong> with Ash.</p>
-           <p>Join Zoom meeting: <a href="${zoomLink}">${zoomLink}</a></p>
+           <p>This is a reminder for your meeting at <strong>${timeStr}</strong> with Ash.</p>
+           <p>Zoom link: <a href="${zoomLink}">${zoomLink}</a></p>
            <p>Thanks,<br/>Ash Uchida</p>`,
   });
 }
@@ -43,7 +45,7 @@ export default async function handler(req, res) {
   try {
     console.log("➡️ Starting reminder check...");
 
-    // 1. Get all bookings from Supabase
+    // 1. Fetch all bookings
     const { data: bookings, error } = await supabase.from("bookings").select("*");
 
     if (error) {
@@ -53,23 +55,25 @@ export default async function handler(req, res) {
 
     console.log(`📌 Found ${bookings.length} bookings`);
 
-    // 2. Current UTC time and 1 hour window
+    // 2. Calculate now and 1-hour window in UTC
     const now = new Date();
     const oneHourFromNow = new Date(now.getTime() + 60 * 60000);
 
     console.log(`🕒 Current UTC time: ${now.toISOString()}`);
     console.log(`🕒 Reminder window ends at: ${oneHourFromNow.toISOString()}`);
 
-    // 3. Filter bookings starting in next 1 hour (UTC comparison)
+    // 3. Filter bookings whose UTC start time is within the next hour
     const upcoming = bookings.filter((b) => {
-      const startUTC = new Date(b.time).getTime(); // UTC milliseconds
-      const nowTime = now.getTime();
+      const startUTC = new Date(b.time).getTime();
+      const nowUTC = now.getTime();
+      const inWindow = startUTC > nowUTC && startUTC <= nowUTC + 60 * 60000;
 
       console.log(
-        `Booking ID ${b.id}: stored UTC = ${b.time}, reminder_sent = ${b.reminder_sent}`
+        `Booking ID ${b.id}: stored UTC=${b.time}, ` +
+        `startUTC=${startUTC}, inWindow=${inWindow}, reminder_sent=${b.reminder_sent}`
       );
 
-      return startUTC > nowTime && startUTC <= nowTime + 60 * 60000 && !b.reminder_sent;
+      return inWindow && !b.reminder_sent;
     });
 
     console.log(`⏰ Bookings needing reminders: ${upcoming.length}`);
@@ -77,10 +81,10 @@ export default async function handler(req, res) {
     const sent = [];
     const failed = [];
 
-    // 4. Send reminder emails
+    // 4. Send reminders
     for (const booking of upcoming) {
       try {
-        console.log(`📨 Sending reminder for booking ID ${booking.id} at ${booking.time}`);
+        console.log(`📨 Sending reminder for booking ID ${booking.id}`);
 
         await sendReminderEmail({
           name: booking.name,
@@ -89,8 +93,12 @@ export default async function handler(req, res) {
           zoomLink: booking.zoom_link,
         });
 
-        // Mark reminder as sent
-        await supabase.from("bookings").update({ reminder_sent: true }).eq("id", booking.id);
+        // Mark as sent
+        await supabase
+          .from("bookings")
+          .update({ reminder_sent: true })
+          .eq("id", booking.id);
+
         sent.push(booking.id);
       } catch (err) {
         console.error("❌ Error sending reminder:", err);
@@ -98,6 +106,7 @@ export default async function handler(req, res) {
       }
     }
 
+    // Response
     return res.status(200).json({
       message: "Reminder check complete",
       sent,
