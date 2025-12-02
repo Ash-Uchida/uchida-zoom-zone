@@ -1,12 +1,9 @@
-// /api/send-reminders.js
-import { google } from "googleapis";
+// api/send-reminders.js
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 
 // Load environment variables
 const {
-  GOOGLE_PRIVATE_KEY,
-  GOOGLE_CLIENT_EMAIL,
   SUPABASE_URL,
   SUPABASE_SERVICE_KEY,
   EMAIL_USER,
@@ -16,16 +13,6 @@ const {
 
 // Initialize Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-
-// Google Auth setup
-const auth = new google.auth.JWT(
-  GOOGLE_CLIENT_EMAIL,
-  null,
-  GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-  ["https://www.googleapis.com/auth/calendar"]
-);
-
-const calendar = google.calendar({ version: "v3", auth });
 
 // ---- Email helper ----
 async function sendReminderEmail({ name, email, time, zoomLink }) {
@@ -46,15 +33,15 @@ async function sendReminderEmail({ name, email, time, zoomLink }) {
   await transporter.sendMail({
     from: EMAIL_FROM,
     to: email,
-    subject: `Reminder: Your Zoom Meeting in 15 minutes`,
+    subject: `Meeting Reminder - ${timeStr}`,
     html: `<p>Hi ${name},</p>
-           <p>This is a friendly reminder that your meeting is starting at <strong>${timeStr}</strong>.</p>
+           <p>This is a friendly reminder for your meeting scheduled at <strong>${timeStr}</strong> with Ash.</p>
            <p>Join Zoom meeting: <a href="${zoomLink}">${zoomLink}</a></p>
            <p>Thanks,<br/>Zoom Zone</p>`,
   });
 }
 
-// ---- Vercel API handler ----
+// ---- Main handler ----
 export default async function handler(req, res) {
   try {
     console.log("➡️ Starting reminder check...");
@@ -70,12 +57,12 @@ export default async function handler(req, res) {
     console.log(`📌 Found ${bookings.length} bookings`);
 
     const now = new Date();
-    const fifteenMinutesFromNow = new Date(now.getTime() + 15 * 60000);
+    const oneHourFromNow = new Date(now.getTime() + 60 * 60000);
 
-    // 2. Filter bookings starting within the next 15 minutes and not yet reminded
+    // 2. Filter bookings starting within the next 1 hour and not yet reminded
     const upcoming = bookings.filter((b) => {
-      const start = new Date(b.start_time + " GMT-0700");
-      return start > now && start <= fifteenMinutesFromNow && !b.reminder_sent;
+      const start = new Date(b.time);
+      return start > now && start <= oneHourFromNow && !b.reminder_sent;
     });
 
     console.log(`⏰ Bookings needing reminders: ${upcoming.length}`);
@@ -91,7 +78,7 @@ export default async function handler(req, res) {
         await sendReminderEmail({
           name: booking.name,
           email: booking.email,
-          time: booking.start_time,
+          time: booking.time,
           zoomLink: booking.zoom_link,
         });
 
@@ -110,7 +97,7 @@ export default async function handler(req, res) {
       sent,
       failed,
       debugNow: now.toISOString(),
-      debugWindowEnd: fifteenMinutesFromNow.toISOString(),
+      debugWindowEnd: oneHourFromNow.toISOString(),
     });
   } catch (e) {
     console.error("🔥 SERVER ERROR:", e);
