@@ -1,3 +1,4 @@
+// /api/send-reminders.js
 import { google } from "googleapis";
 import { createClient } from "@supabase/supabase-js";
 
@@ -23,6 +24,9 @@ const auth = new google.auth.JWT(
 
 const calendar = google.calendar({ version: "v3", auth });
 
+// 15-minute reminder window
+const REMINDER_MINUTES = 15;
+
 export default async function handler(req, res) {
   try {
     console.log("➡️ Starting reminder check...");
@@ -40,12 +44,12 @@ export default async function handler(req, res) {
     console.log(`📌 Found ${bookings.length} bookings`);
 
     const now = new Date();
-    const tenMinutesFromNow = new Date(now.getTime() + 10 * 60000);
+    const reminderWindowEnd = new Date(now.getTime() + REMINDER_MINUTES * 60000);
 
-    // 2. Filter bookings starting within the next 10 minutes
+    // 2. Filter bookings starting within the next REMINDER_MINUTES
     const upcoming = bookings.filter((b) => {
       const start = new Date(b.start_time);
-      return start > now && start <= tenMinutesFromNow;
+      return start > now && start <= reminderWindowEnd && !b.reminder_sent;
     });
 
     console.log(`⏰ Bookings needing reminders: ${upcoming.length}`);
@@ -53,37 +57,58 @@ export default async function handler(req, res) {
     let sent = [];
     let failed = [];
 
-    // 3. Send reminder emails through Google Calendar
     for (const booking of upcoming) {
       try {
-        const eventId = booking.event_id;
+        console.log(`📨 Processing booking: ${booking.id}, time: ${booking.start_time}`);
 
-        console.log(`📨 Sending reminder for event: ${eventId}`);
+        // Fetch the corresponding Google Calendar event
+        const event = await calendar.events.get({
+          calendarId: "primary",
+          eventId: booking.event_id
+        });
 
+        if (!event.data) {
+          console.warn(`⚠️ Event not found on Google Calendar: ${booking.event_id}`);
+          failed.push({ bookingId: booking.id, reason: "Event not found" });
+          continue;
+        }
+
+        // Send reminder via Google Calendar
         await calendar.events.patch({
           calendarId: "primary",
-          eventId,
+          eventId: booking.event_id,
           sendUpdates: "all",
           requestBody: {
             reminders: {
               useDefault: false,
-              overrides: [{ method: "email", minutes: 5 }]
+              overrides: [{ method: "email", minutes: REMINDER_MINUTES }]
             }
           }
         });
 
-        sent.push(eventId);
+        console.log(`✅ Reminder sent for booking: ${booking.id}`);
+        sent.push(booking.id);
+
+        // Mark reminder as sent in Supabase
+        await supabase
+          .from("bookings")
+          .update({ reminder_sent: true })
+          .eq("id", booking.id);
+
       } catch (err) {
-        console.error("❌ Error sending reminder:", err);
-        failed.push({ eventId: booking.event_id, error: err.message });
+        console.error(`❌ Error processing booking ${booking.id}:`, err.message);
+        failed.push({ bookingId: booking.id, error: err.message });
       }
     }
 
     return res.status(200).json({
       message: "Reminder check complete",
       sent,
-      failed
+      failed,
+      debugNow: now.toISOString(),
+      debugWindowEnd: reminderWindowEnd.toISOString()
     });
+
   } catch (e) {
     console.error("🔥 SERVER ERROR:", e);
     return res.status(500).json({ error: e.message });
