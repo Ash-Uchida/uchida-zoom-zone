@@ -56,7 +56,15 @@ export default function App() {
       const res = await fetch(`/api/calendar/busy?date=${dateFormatted}`);
       if (!res.ok) throw new Error("Failed to fetch busy times");
       const data = await res.json();
-      return data.busyTimes || [];
+
+      // DEBUG LOG
+      console.log("Busy times fetched for", dateFormatted, data.busyTimes);
+
+      // Convert each busy time to a Date object for comparison
+      return (data.busyTimes || []).map((bt) => ({
+        start: new Date(bt.start),
+        end: new Date(bt.end),
+      }));
     } catch (err) {
       console.error("Error fetching busy times:", err);
       return [];
@@ -69,8 +77,6 @@ export default function App() {
 
     const updateSlots = async () => {
       const busyTimes = await fetchBusyTimes();
-      console.log("Busy times from backend:", busyTimes);
-
       const slots = generateTimeSlots(duration);
 
       const freeSlots = slots.map((slot) => {
@@ -81,10 +87,13 @@ export default function App() {
 
         // Check if this slot overlaps any busy time
         const isBusy = busyTimes.some((bt) => {
-          const btStart = new Date(bt.start);
-          const btEnd = new Date(bt.end);
-          return slotStart < btEnd && slotEnd > btStart;
+          return slotStart < bt.end && slotEnd > bt.start;
         });
+
+        // DEBUG LOG
+        console.log(
+          `Slot ${slot.time}: start=${slotStart.toISOString()} end=${slotEnd.toISOString()} busy=${isBusy}`
+        );
 
         return { ...slot, busy: isBusy };
       });

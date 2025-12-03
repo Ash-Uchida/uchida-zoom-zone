@@ -35,6 +35,7 @@ export default async function handler(req, res) {
 
     const calendar = google.calendar({ version: "v3", auth: oAuth2Client });
 
+    // Fetch all events for the day
     const response = await calendar.events.list({
       calendarId: process.env.GOOGLE_CALENDAR_ID || "primary",
       timeMin: dayStart.toISOString(),
@@ -45,10 +46,18 @@ export default async function handler(req, res) {
 
     const events = response.data.items || [];
 
-    const busyTimes = events.map(event => ({
-      start: event.start.dateTime || event.start.date,
-      end: event.end.dateTime || event.end.date,
-    }));
+    // Normalize all events to full ISO strings in local time
+    const busyTimes = events.map(event => {
+      const startISO =
+        event.start.dateTime || event.start.date + "T00:00:00";
+      const endISO =
+        event.end.dateTime || event.end.date + "T23:59:59";
+
+      return {
+        start: new Date(startISO),
+        end: new Date(endISO),
+      };
+    });
 
     return res.status(200).json({ busyTimes });
   } catch (err) {
