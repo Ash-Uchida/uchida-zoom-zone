@@ -23,9 +23,9 @@ async function sendBookingEmails({ name, email, dateTime, zoomLink, duration }) 
   await transporter.sendMail({
     from: process.env.EMAIL_FROM,
     to: email,
-    subject: `Your Zoom Zone Meeting - ${dateTimeStr}`,
+    subject: `Your Zoom Zone Meeting - ${dateTimeStr} (MST/MDT)`,
     html: `<p>Hi ${name},</p>
-           <p>Your meeting is scheduled for <strong>${dateTimeStr}</strong> and will last <strong>${duration} minutes</strong>.</p>
+           <p>Your meeting is scheduled for <strong>${dateTimeStr}</strong> (MST/MDT) and will last <strong>${duration} minutes</strong>.</p>
            <p>Join Zoom meeting: <a href="${zoomLink}">${zoomLink}</a></p>
            <p>Thanks,<br/>Zoom Zone</p>`,
   });
