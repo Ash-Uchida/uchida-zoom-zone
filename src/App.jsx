@@ -74,15 +74,18 @@ export default function App() {
       const slots = generateTimeSlots(duration);
 
       const freeSlots = slots.map((slot) => {
-        const slotStart = new Date(`${selectedDate.toISOString().split("T")[0]}T${slot.time}:00`).getTime();
-        const slotEnd = slotStart + duration * 60 * 1000; // slot end
+        const [hour, minute] = slot.time.split(":").map(Number);
+        const slotStart = new Date(selectedDate);
+        slotStart.setHours(hour, minute, 0, 0);
+        const slotEnd = new Date(slotStart.getTime() + duration * 60 * 1000);
+
+        // Check if this slot overlaps any busy time
         const isBusy = busyTimes.some((bt) => {
-          const btStart = new Date(bt.start).getTime();
-          const btEnd = new Date(bt.end).getTime();
-          // overlap check
+          const btStart = new Date(bt.start);
+          const btEnd = new Date(bt.end);
           return slotStart < btEnd && slotEnd > btStart;
         });
-        if (isBusy) console.log("Slot busy:", slot.time);
+
         return { ...slot, busy: isBusy };
       });
 
