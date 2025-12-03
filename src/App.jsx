@@ -144,7 +144,7 @@ export default function App() {
           />
 
           <label>
-            Meeting Time grrr(MST):
+            Meeting Time (MST):
             {loadingSlots ? (
               <div>Loading times...</div>
             ) : availableSlots.length === 0 ? (
