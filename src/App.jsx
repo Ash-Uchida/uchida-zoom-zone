@@ -28,12 +28,13 @@ export default function App() {
   };
 
   const generateTimeSlots = (durationMinutes = 15) => {
+    if (!selectedDate) return [];
     const slots = [];
-    const now = new Date();
     const start = new Date(selectedDate);
     start.setHours(6, 0, 0, 0);
     const end = new Date(selectedDate);
     end.setHours(22, 0, 0, 0);
+    const now = new Date();
 
     let slotTime = new Date(start);
     while (slotTime <= end) {
@@ -44,10 +45,12 @@ export default function App() {
       }
       slotTime = new Date(slotTime.getTime() + durationMinutes * 60000);
     }
+
     return slots;
   };
 
   const fetchBusyTimes = async () => {
+    if (!selectedDate) return [];
     try {
       const dateFormatted = selectedDate.toISOString().split("T")[0];
       const res = await fetch(`/api/calendar/busy?date=${dateFormatted}`);
@@ -72,10 +75,12 @@ export default function App() {
 
       const freeSlots = slots.map((slot) => {
         const slotStart = new Date(`${selectedDate.toISOString().split("T")[0]}T${slot.time}:00`).getTime();
+        const slotEnd = slotStart + duration * 60 * 1000; // slot end
         const isBusy = busyTimes.some((bt) => {
           const btStart = new Date(bt.start).getTime();
           const btEnd = new Date(bt.end).getTime();
-          return slotStart >= btStart && slotStart < btEnd;
+          // overlap check
+          return slotStart < btEnd && slotEnd > btStart;
         });
         if (isBusy) console.log("Slot busy:", slot.time);
         return { ...slot, busy: isBusy };
@@ -139,7 +144,7 @@ export default function App() {
           />
 
           <label>
-            Meeting Time:
+            Meeting Time (MST):
             {loadingSlots ? (
               <div>Loading times...</div>
             ) : availableSlots.length === 0 ? (
