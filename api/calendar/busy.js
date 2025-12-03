@@ -11,10 +11,9 @@ export default async function handler(req, res) {
     const { date } = req.query;
     if (!date) return res.status(400).json({ error: "Missing 'date' query parameter" });
 
-    const selectedDate = new Date(date);
-    const dayStart = new Date(selectedDate);
+    const dayStart = new Date(date);
     dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(selectedDate);
+    const dayEnd = new Date(date);
     dayEnd.setHours(23, 59, 59, 999);
 
     // Fetch Google integration tokens
@@ -37,7 +36,7 @@ export default async function handler(req, res) {
     const calendar = google.calendar({ version: "v3", auth: oAuth2Client });
 
     const response = await calendar.events.list({
-      calendarId: "primary",
+      calendarId: process.env.GOOGLE_CALENDAR_ID || "primary",
       timeMin: dayStart.toISOString(),
       timeMax: dayEnd.toISOString(),
       singleEvents: true,
@@ -46,23 +45,10 @@ export default async function handler(req, res) {
 
     const events = response.data.items || [];
 
-    const busyTimes = events.map((event) => {
-      let start, end;
-
-      if (event.start.dateTime && event.end.dateTime) {
-        // normal event with times
-        start = new Date(event.start.dateTime).toISOString();
-        end = new Date(event.end.dateTime).toISOString();
-      } else if (event.start.date && event.end.date) {
-        // all-day event: treat as full day
-        start = new Date(event.start.date).setHours(0, 0, 0, 0);
-        end = new Date(event.end.date).setHours(23, 59, 59, 999);
-        start = new Date(start).toISOString();
-        end = new Date(end).toISOString();
-      }
-
-      return { start, end };
-    });
+    const busyTimes = events.map(event => ({
+      start: event.start.dateTime || event.start.date,
+      end: event.end.dateTime || event.end.date,
+    }));
 
     return res.status(200).json({ busyTimes });
   } catch (err) {
