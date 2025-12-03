@@ -72,14 +72,11 @@ export default function App() {
 
       const freeSlots = slots.map((slot) => {
         const slotStart = new Date(`${selectedDate.toISOString().split("T")[0]}T${slot.time}:00`).getTime();
-        const slotEnd = slotStart + duration * 60 * 1000; // account for slot duration
-
         const isBusy = busyTimes.some((bt) => {
           const btStart = new Date(bt.start).getTime();
           const btEnd = new Date(bt.end).getTime();
-          return slotStart < btEnd && slotEnd > btStart; // overlap check
+          return slotStart >= btStart && slotStart < btEnd;
         });
-
         if (isBusy) console.log("Slot busy:", slot.time);
         return { ...slot, busy: isBusy };
       });
@@ -142,7 +139,7 @@ export default function App() {
           />
 
           <label>
-            Meeting Time (MST):
+            Meeting Time:
             {loadingSlots ? (
               <div>Loading times...</div>
             ) : availableSlots.length === 0 ? (
