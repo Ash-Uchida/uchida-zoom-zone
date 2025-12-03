@@ -5,7 +5,6 @@ import { createClient } from "@supabase/supabase-js";
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
 export default async function handler(req, res) {
-  // Prevent caching
   res.setHeader("Cache-Control", "no-store, max-age=0");
 
   try {
@@ -13,8 +12,10 @@ export default async function handler(req, res) {
     if (!date) return res.status(400).json({ error: "Missing 'date' query parameter" });
 
     const selectedDate = new Date(date);
-    const dayStart = new Date(selectedDate.setHours(0, 0, 0, 0));
-    const dayEnd = new Date(selectedDate.setHours(23, 59, 59, 999));
+    const dayStart = new Date(selectedDate);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(selectedDate);
+    dayEnd.setHours(23, 59, 59, 999);
 
     // Fetch Google integration tokens
     const { data: integration, error } = await supabase
@@ -45,10 +46,23 @@ export default async function handler(req, res) {
 
     const events = response.data.items || [];
 
-    const busyTimes = events.map(event => ({
-      start: event.start.dateTime || event.start.date,
-      end: event.end.dateTime || event.end.date,
-    }));
+    const busyTimes = events.map((event) => {
+      let start, end;
+
+      if (event.start.dateTime && event.end.dateTime) {
+        // normal event with times
+        start = new Date(event.start.dateTime).toISOString();
+        end = new Date(event.end.dateTime).toISOString();
+      } else if (event.start.date && event.end.date) {
+        // all-day event: treat as full day
+        start = new Date(event.start.date).setHours(0, 0, 0, 0);
+        end = new Date(event.end.date).setHours(23, 59, 59, 999);
+        start = new Date(start).toISOString();
+        end = new Date(end).toISOString();
+      }
+
+      return { start, end };
+    });
 
     return res.status(200).json({ busyTimes });
   } catch (err) {
