@@ -1,0 +1,40 @@
+name: Send Calendar Reminders
+
+# Trigger: every 15 minutes + manual trigger if needed
+on:
+  schedule:
+    - cron: "*/15 * * * *"  # runs every 15 minutes
+  workflow_dispatch:        # allows manual run
+
+jobs:
+  send_reminders:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout repository code
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 2. Setup Node.js environment
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # 3. Install project dependencies
+      - name: Install dependencies
+        run: npm install
+
+      # 4. Run the reminder script
+      - name: Run send-reminders.js
+        env:
+          # Supabase credentials
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+
+          # Email credentials
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+
+        run: node api/send-reminders.js
