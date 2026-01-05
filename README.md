@@ -1,16 +1,37 @@
-# React + Vite
+# Zoom Zone — Automated Meeting Scheduling
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Zoom Zone is a full-stack scheduling web application that integrates Google Calendar OAuth and the Zoom API to automatically create meetings and store booking data.
 
-Currently, two official plugins are available:
+This project was originally started during a Cloudathon with Cloud Society and later expanded independently to complete the core scheduling workflow.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+---
 
-## React Compiler
+## Features
+- Google OAuth authentication to securely access calendar data
+- Automatic Zoom meeting creation using the Zoom API
+- Serverless backend using Vercel API routes
+- Booking data stored and managed with Supabase
+- React + Vite frontend with a Calendly-style booking experience
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## Tech Stack
+- Frontend: React, Vite, JavaScript, HTML, CSS
+- Backend: Vercel Serverless Functions
+- Database: Supabase
+- APIs: Google Calendar API, Zoom API
+- Authentication: OAuth 2.0
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+---
+
+## Live Demo
+https://uchida-zoom-zone.vercel.app
+
+---
+
+## Why This Project
+This project provided hands-on experience with OAuth flows, third-party API integrations, serverless architecture, and full-stack deployment using modern web technologies.
+
+---
+
+Environment variables and API keys are not included in this repository.
